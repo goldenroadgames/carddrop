@@ -1,0 +1,14 @@
+# Secrets — never commit
+CardDrop/Supabase/Secrets.swift
+
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# macOS
+.DS_Store

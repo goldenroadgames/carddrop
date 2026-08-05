@@ -6,14 +6,31 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1F8A99B22F7CA10900FF2E4F /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 1F8A99B12F7CA10900FF2E4F /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
-		1F88BC1B2F7C708800671BA2 /* Picture Postcard.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Picture Postcard.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1F88BC1B2F7C708800671BA2 /* CardDrop.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CardDrop.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1F92595F2F8D4B9B00402551 /* Exceptions for "CardDrop" folder in "CardDrop" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 1F88BC1A2F7C708800671BA2 /* CardDrop */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		1F88BC1D2F7C708800671BA2 /* Picture Postcard */ = {
+		1F88BC1D2F7C708800671BA2 /* CardDrop */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Picture Postcard";
+			exceptions = (
+				1F92595F2F8D4B9B00402551 /* Exceptions for "CardDrop" folder in "CardDrop" target */,
+			);
+			path = CardDrop;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -23,6 +40,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1F8A99B22F7CA10900FF2E4F /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -32,7 +50,8 @@
 		1F88BC122F7C708800671BA2 = {
 			isa = PBXGroup;
 			children = (
-				1F88BC1D2F7C708800671BA2 /* Picture Postcard */,
+				1F88BC1D2F7C708800671BA2 /* CardDrop */,
+				1F8A99B02F7CA10900FF2E4F /* Frameworks */,
 				1F88BC1C2F7C708800671BA2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -40,17 +59,24 @@
 		1F88BC1C2F7C708800671BA2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				1F88BC1B2F7C708800671BA2 /* Picture Postcard.app */,
+				1F88BC1B2F7C708800671BA2 /* CardDrop.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		1F8A99B02F7CA10900FF2E4F /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		1F88BC1A2F7C708800671BA2 /* Picture Postcard */ = {
+		1F88BC1A2F7C708800671BA2 /* CardDrop */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 1F88BC262F7C708A00671BA2 /* Build configuration list for PBXNativeTarget "Picture Postcard" */;
+			buildConfigurationList = 1F88BC262F7C708A00671BA2 /* Build configuration list for PBXNativeTarget "CardDrop" */;
 			buildPhases = (
 				1F88BC172F7C708800671BA2 /* Sources */,
 				1F88BC182F7C708800671BA2 /* Frameworks */,
@@ -61,13 +87,14 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				1F88BC1D2F7C708800671BA2 /* Picture Postcard */,
+				1F88BC1D2F7C708800671BA2 /* CardDrop */,
 			);
-			name = "Picture Postcard";
+			name = CardDrop;
 			packageProductDependencies = (
+				1F8A99B12F7CA10900FF2E4F /* Supabase */,
 			);
 			productName = "Picture Postcard";
-			productReference = 1F88BC1B2F7C708800671BA2 /* Picture Postcard.app */;
+			productReference = 1F88BC1B2F7C708800671BA2 /* CardDrop.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +112,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 1F88BC162F7C708800671BA2 /* Build configuration list for PBXProject "Picture Postcard" */;
+			buildConfigurationList = 1F88BC162F7C708800671BA2 /* Build configuration list for PBXProject "CardDrop" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -94,12 +121,15 @@
 			);
 			mainGroup = 1F88BC122F7C708800671BA2;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1F8A99A72F7C9EAD00FF2E4F /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1F88BC1C2F7C708800671BA2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				1F88BC1A2F7C708800671BA2 /* Picture Postcard */,
+				1F88BC1A2F7C708800671BA2 /* CardDrop */,
 			);
 		};
 /* End PBXProject section */
@@ -253,22 +283,29 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = F99LV8LFU9;
+				DEVELOPMENT_TEAM = 7VPQM9Q6TD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CardDrop/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CardDrop;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.goldenroadgames.Picture-Postcard";
+				PRODUCT_BUNDLE_IDENTIFIER = com.goldenroadgames.carddrop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -285,22 +322,29 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = F99LV8LFU9;
+				DEVELOPMENT_TEAM = 7VPQM9Q6TD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = CardDrop/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CardDrop;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.goldenroadgames.Picture-Postcard";
+				PRODUCT_BUNDLE_IDENTIFIER = com.goldenroadgames.carddrop;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -313,7 +357,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		1F88BC162F7C708800671BA2 /* Build configuration list for PBXProject "Picture Postcard" */ = {
+		1F88BC162F7C708800671BA2 /* Build configuration list for PBXProject "CardDrop" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1F88BC242F7C708A00671BA2 /* Debug */,
@@ -322,7 +366,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		1F88BC262F7C708A00671BA2 /* Build configuration list for PBXNativeTarget "Picture Postcard" */ = {
+		1F88BC262F7C708A00671BA2 /* Build configuration list for PBXNativeTarget "CardDrop" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				1F88BC272F7C708A00671BA2 /* Debug */,
@@ -332,6 +376,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1F8A99A72F7C9EAD00FF2E4F /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.5.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1F8A99B12F7CA10900FF2E4F /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1F8A99A72F7C9EAD00FF2E4F /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1F88BC132F7C708800671BA2 /* Project object */;
 }

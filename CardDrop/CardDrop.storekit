@@ -1,0 +1,56 @@
+{
+  "identifier" : "CardDrop",
+  "nonConsumableProducts" : [
+    {
+      "displayPrice" : "9.99",
+      "familySharable" : false,
+      "internalID" : "permanent_storage",
+      "localizations" : [
+        {
+          "description" : "Your digital cards are stored permanently — no 30-day expiry. As long as your account is active, your cards stay live.",
+          "displayName" : "Permanent Card Storage",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.goldenroadgames.carddrop.permanentstorage",
+      "referenceName" : "Permanent Card Storage",
+      "type" : "NonConsumable"
+    }
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "com.goldenroadgames.carddrop",
+    "_developerTeamID" : "",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}
