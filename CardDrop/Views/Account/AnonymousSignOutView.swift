@@ -87,23 +87,24 @@ struct AnonymousSignOutView: View {
                                 HStack {
                                     Image(systemName: "apple.logo")
                                     Text("Sign in with Apple")
-                                        .fontWeight(.semibold)
+                                        .font(.system(size: 17, weight: .semibold))
                                 }
                                 .frame(maxWidth: .infinity)
                                 .padding()
                                 .background(Color.primary)
                                 .foregroundColor(Color(uiColor: .systemBackground))
-                                .cornerRadius(12)
+                                .cornerRadius(999)
                             }
                             .disabled(isWorking)
 
                             Button(action: { showCreateAccount = true }) {
                                 Text("Create Account with Email")
+                                    .font(.system(size: 17, weight: .semibold))
                                     .frame(maxWidth: .infinity)
                                     .padding()
                                     .background(Color.brandBlue)
                                     .foregroundColor(.white)
-                                    .cornerRadius(12)
+                                    .cornerRadius(999)
                             }
                             .disabled(isWorking)
                         }
@@ -113,11 +114,12 @@ struct AnonymousSignOutView: View {
                             discard()
                         } label: {
                             Text("Discard and sign out")
+                                .font(.system(size: 17, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding()
                                 .background(Color(.secondarySystemBackground))
                                 .foregroundColor(.red)
-                                .cornerRadius(12)
+                                .cornerRadius(999)
                         }
                         .disabled(isWorking)
 
@@ -139,10 +141,7 @@ struct AnonymousSignOutView: View {
             .navigationTitle("Sign Out")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isWorking)
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction, isDisabled: isWorking) { dismiss() }
             }
             .navigationDestination(isPresented: $showCreateAccount) {
                 CreateAccountView()

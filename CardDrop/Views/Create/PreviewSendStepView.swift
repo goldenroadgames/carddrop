@@ -3,159 +3,21 @@ import CoreImage.CIFilterBuiltins
 import MessageUI
 import Supabase
 
-// MARK: - Preview & Send step
-
-struct PreviewSendStepView: View {
-    @ObservedObject var draft: PostcardDraft
-    let filteredImage: UIImage?
-    let originalStatus: CardStatus
-    var onNext: () -> Void
-
-    @EnvironmentObject private var authManager: AuthManager
-    @EnvironmentObject private var draftManager: DraftManager
-    @EnvironmentObject private var addressBook: AddressBookManager
-
-    @State private var showingFront = true
-    @State private var scaleX: CGFloat = 1.0
-    @State private var showSubscribeGate = false
-    @State private var frontRenderImage: UIImage? = nil
-    @State private var backRenderImage: UIImage? = nil
-    @State private var isRendering = false
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if showingFront {
-                GeometryReader { geo in
-                    let frame = cardFrame(in: geo.size, ratio: draft.orientation.aspectRatio)
-                    VStack(spacing: 12) {
-                        Spacer()
-                        if let img = frontRenderImage {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: frame.width, height: frame.height)
-                                .compositingGroup()
-                                .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
-                                .scaleEffect(x: scaleX, y: 1)
-                                .onTapGesture { flip() }
-                        } else {
-                            ProgressView()
-                                .frame(width: frame.width, height: frame.height)
-                        }
-                        Text("Tap to see the back")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                    .frame(width: geo.size.width, height: geo.size.height)
-                }
-            } else {
-                GeometryReader { geo in
-                    let backFrame = cardFrame(in: geo.size, ratio: 6.0 / 4.0)
-                    ScrollView {
-                        VStack(spacing: 12) {
-                            if let img = backRenderImage {
-                                Image(uiImage: img)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxWidth: geo.size.width - 32)
-                                    .compositingGroup()
-                                    .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
-                                    .scaleEffect(x: scaleX, y: 1)
-                                    .onTapGesture { flip() }
-                            } else {
-                                ProgressView()
-                                    .frame(width: backFrame.width, height: backFrame.height)
-                            }
-                            Text("Tap to see the front")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            CardChecklistView(draft: draft)
-                                .padding(.horizontal)
-                                .padding(.bottom)
-                        }
-                        .frame(width: geo.size.width)
-                        .padding(.top, 16)
-                    }
-                }
-            }
-
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button(action: handleNextSend) {
-                Label("Next: Send", systemImage: "paperplane")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.brandBlue)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 12)
-            .background(Color(uiColor: .systemBackground))
-        }
-        .sheet(isPresented: $showSubscribeGate) {
-            SubscribeGateView(onSuccess: {
-                showSubscribeGate = false
-                onNext()
-            })
-            .environmentObject(authManager)
-            .environmentObject(draftManager)
-            .environmentObject(addressBook)
-        }
-        .onAppear {
-            if originalStatus == .sent {
-                frontRenderImage = draftManager.loadFront(for: draft.cardID)
-                backRenderImage  = draftManager.loadBack(for: draft.cardID)
-            } else {
-                triggerRender()
-            }
-        }
-    }
-
-    private func handleNextSend() {
-        onNext()
-    }
-
-    private func triggerRender() {
-        guard filteredImage != nil else { return }
-        Task { @MainActor in
-            isRendering = true
-            await Task.yield()
-            renderAll()
-            isRendering = false
-        }
-    }
-
-    @MainActor
-    private func renderAll() {
-        guard let result = CardRenderer.renderAndSave(draft: draft, filteredImage: filteredImage, draftManager: draftManager) else { return }
-        frontRenderImage = result.front
-        backRenderImage  = result.back
-    }
-
-    private func flip() {
-        withAnimation(.easeIn(duration: 0.18)) { scaleX = 0 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            showingFront.toggle()
-            withAnimation(.easeOut(duration: 0.18)) { scaleX = 1 }
-        }
-    }
-
-    private func cardFrame(in available: CGSize, ratio: CGFloat) -> CGSize {
-        let maxW = available.width - 48
-        let maxH = available.height - 120
-        if ratio >= 1 {
-            let w = min(maxW, maxH * ratio)
-            return CGSize(width: w, height: w / ratio)
-        } else {
-            let h = min(maxH, maxW / ratio)
-            return CGSize(width: h * ratio, height: h)
-        }
-    }
-}
-
 // MARK: - Send Options sheet
+
+// Compile-time check (not runtime) — this branch doesn't exist at all in
+// device/App Store builds. The Simulator can't present MFMailComposeViewController
+// or MFMessageComposeViewController (canSendMail()/canSendText() are always
+// false), so without this, a digital send in the Simulator uploads
+// successfully but the draft never flips to .sent, since that only happens
+// in the composer's onSent callback.
+private var isRunningInSimulator: Bool {
+    #if targetEnvironment(simulator)
+    true
+    #else
+    false
+    #endif
+}
 
 struct SendOptionsView: View {
     @ObservedObject var draft: PostcardDraft
@@ -164,6 +26,8 @@ struct SendOptionsView: View {
     let hasDraftSaved: Bool
     var onSaveUnsent: () -> Void
     var onSaveSent: () -> Void
+    var onGoToFront: () -> Void
+    var onGoToBack: () -> Void
     var onGoToAddress: () -> Void
     var onFinish: () -> Void
     var onSendToSomeoneElse: () -> Void
@@ -180,15 +44,14 @@ struct SendOptionsView: View {
     @State private var showSendErrorAlert = false
     @State private var hasSent = false
     @State private var showMissingPhotoAlert = false
-    @State private var showPreview = false
     @State private var showStorageUpgrade = false
     @State private var showCreateAccount = false
     @State private var showVerifyEmail = false
     @State private var limitPrompt: LimitPrompt? = nil
     @State private var showEmailRecipients = false
-    @State private var pendingEmailRecipients: [String] = []
+    @State private var pendingEmailRecipients: [RecipientContact] = []
     @State private var showMessageRecipients = false
-    @State private var pendingMessageRecipients: [String] = []
+    @State private var pendingMessageRecipients: [RecipientContact] = []
 
     private struct LimitPrompt: Identifiable {
         let id = UUID()
@@ -199,109 +62,137 @@ struct SendOptionsView: View {
     @EnvironmentObject private var draftManager: DraftManager
     @EnvironmentObject private var addressBook: AddressBookManager
 
+    // Inline flip preview — front -> 4x6 back -> 6x9 back -> loop, cycling
+    // forward on every tap. Replaces the old CardFlipPreviewSheet modal;
+    // the thumbnail itself now carries the flip capability directly.
+    private enum CardFace: Int, CaseIterable {
+        case front, back4x6, back6x9
+    }
+
+    @State private var face: CardFace = .front
+    @State private var previewScaleX: CGFloat = 1.0
+    @State private var backRenderImage: UIImage? = nil
+    @State private var back6x9RenderImage: UIImage? = nil
+
+    private var currentPreviewImage: UIImage? {
+        switch face {
+        case .front:   return teaserImage ?? filteredImage
+        case .back4x6: return backRenderImage
+        case .back6x9: return back6x9RenderImage
+        }
+    }
+
+    private var currentPreviewSizeLabel: String? {
+        switch face {
+        case .front:   return nil
+        case .back4x6: return "\n4x6 Standard Size"
+        case .back6x9: return "6x9 Deluxe Size - more than twice the size of a standard size card - bigger picture, larger text"
+        }
+    }
+
+    private func flipPreview() {
+        withAnimation(.easeIn(duration: 0.18)) { previewScaleX = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            let allFaces = CardFace.allCases
+            let nextIndex = (allFaces.firstIndex(of: face)! + 1) % allFaces.count
+            face = allFaces[nextIndex]
+            withAnimation(.easeOut(duration: 0.18)) { previewScaleX = 1 }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
 
-            // Card thumbnail + recipient
-            VStack(spacing: 6) {
-                if draft.recipientName.isEmpty {
-                    Text("No recipient yet")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                } else {
-                    Text("To: \(draft.recipientName)")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(.primary)
+        // A still-editable (unsent) session jumps straight back to Style It /
+        // Write Card in place. A sent card's whole flow is read-only (see
+        // chevronControls in CreateFlowView), so editing one instead clones
+        // it and opens the clone at Style It — same as "Copy & Edit" on the
+        // sent-card detail sheet.
+        Group {
+            if originalStatus == .sent {
+                Button(action: onEditCard) {
+                    Text("Copy & Edit")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.brandBlue)
+                        .foregroundColor(.white)
+                        .cornerRadius(999)
                 }
-                Button(action: { showPreview = true }) {
-                    VStack(spacing: 6) {
-                        if let img = teaserImage ?? filteredImage {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(height: 110)
-                                .cornerRadius(6)
-                                .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
-                        }
-                        Text("Tap to Preview")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundColor(.brandBlue)
+            } else {
+                HStack(spacing: 12) {
+                    Button(action: onGoToFront) {
+                        Text("Edit Front")
+                            .font(.system(size: 17, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.brandBlue)
+                            .foregroundColor(.white)
+                            .cornerRadius(999)
+                    }
+                    Button(action: onGoToBack) {
+                        Text("Edit Back")
+                            .font(.system(size: 17, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.brandBlue)
+                            .foregroundColor(.white)
+                            .cornerRadius(999)
                     }
                 }
-                .buttonStyle(.plain)
             }
-            .padding(.top, 16)
-            .padding(.bottom, 16)
+        }
+            .padding(.horizontal)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
             .frame(maxWidth: .infinity)
+            .background(Color(uiColor: .systemGroupedBackground))
 
-        List {
-            Section {
-                    if authManager.isAnonymous {
-                        Button(action: { showCreateAccount = true }) {
-                            Text("Create Account - Send Real Postcards")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(Color.brandBlue)
-                                .foregroundColor(.white)
-                                .cornerRadius(12)
-                        }
-                    }
-                    comingSoonRow(icon: "shippingbox", title: "Send Real Postcard",
-                                  subtitle: "Printed & mailed for you")
-                } header: {
-                    Text("Send a Postcard")
-                }
+        GeometryReader { geo in
+        // Content block — label (if any), image, "Tap to flip" — packed
+        // tightly with 12pt between each piece using nothing but a plain
+        // VStack (no Spacers, no per-child maxHeight/alignment tricks that
+        // could push them apart). The block sizes itself to its own content,
+        // then that whole compact block is centered as a unit — both axes —
+        // via the single .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // on the VStack itself below. The image is capped only by width;
+        // scaledToFit derives its height from that, so it never expands to
+        // fill the safe zone and shove its siblings apart.
+        let maxImageWidth = geo.size.width - 32
 
-                Section {
-                    sendRow(
-                        icon: "envelope",
-                        title: "Email",
-                        subtitle: "Send as an interactive postcard",
-                        color: .blue
-                    ) { sendEmail() }
-
-                    sendRow(
-                        icon: "message",
-                        title: "Text Message",
-                        subtitle: "Send via Messages",
-                        color: .green
-                    ) { sendText() }
-
-                } header: {
-                    Text("Send Digitally — Free")
-                }
-
-            if !authManager.hasPermanentStorage && !authManager.isAnonymous && authManager.isEmailVerified {
-                Section {
-                    Button(action: { showStorageUpgrade = true }) {
-                        HStack(spacing: 14) {
-                            Image(systemName: "archivebox")
-                                .font(.title2)
-                                .foregroundColor(.purple)
-                                .frame(width: 36)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Cards expire after 30 days")
-                                    .foregroundColor(.primary)
-                                Text("Upgrade once for permanent storage — $9.99")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
+        VStack(spacing: 0) {
+            if let label = currentPreviewSizeLabel {
+                Text(label)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.brandBlue)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: maxImageWidth - 20, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 8)
             }
 
-            if draft.image != nil {
-                Section {
-                    sendRow(icon: "pencil", title: "Edit Card", color: .orange) { onEditCard() }
-                }
+            if let img = currentPreviewImage {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: maxImageWidth)
+                    .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+                    .scaleEffect(x: previewScaleX, y: 1)
+                    .onTapGesture { flipPreview() }
+            } else {
+                ProgressView()
+                    .frame(width: maxImageWidth, height: 150)
             }
-            }
+
+            Text("Tap to flip")
+                .font(.subheadline.weight(.medium))
+                .foregroundColor(.gray)
+                .padding(.top, 8)
+        }
+            .padding(.top, 10)
+            .padding(.bottom, 10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(uiColor: .systemGroupedBackground))
             .overlay {
                 if isSending {
                     ZStack {
@@ -321,15 +212,10 @@ struct SendOptionsView: View {
             } message: {
                 Text(sendError ?? "Something went wrong. Please try again.")
             }
-        .sheet(isPresented: $showPreview) {
-            CardFlipPreviewSheet(
-                frontImage: draftManager.loadFront(for: draft.cardID),
-                backImage: draftManager.loadBack(for: draft.cardID),
-                aspectRatio: draft.orientation.aspectRatio
-            )
-        }
         .onAppear {
-            teaserImage = draftManager.loadFront(for: draft.cardID)
+            teaserImage       = draftManager.loadFront(for: draft.cardID)
+            backRenderImage   = draftManager.loadBack(for: draft.cardID)
+            back6x9RenderImage = draftManager.loadBack6x9(for: draft.cardID)
         }
         .onChange(of: filteredImage) { _, newImage in
             guard newImage != nil else { return }
@@ -344,13 +230,14 @@ struct SendOptionsView: View {
         .sheet(isPresented: $showMailComposer) {
             if let result = cardSendResult {
                 MailComposeView(
-                    teaserImage: teaserImage,
+                    compositeImageURL: result.compositeImageURL,
                     cardURL: result.cardURL,
-                    recipientEmails: pendingEmailRecipients,
+                    recipientEmails: pendingEmailRecipients.map(\.value),
                     cardID: result.cardID,
+                    senderNickname: draft.senderNickname.isEmpty ? nil : draft.senderNickname,
                     onSent: {
                         Task {
-                            await insertEmailRecipients(emails: pendingEmailRecipients, cardID: result.cardID)
+                            await insertEmailRecipients(entries: pendingEmailRecipients, cardID: result.cardID)
                             onSaveSent()
                             onFinish()
                         }
@@ -363,20 +250,22 @@ struct SendOptionsView: View {
             }
         }
         .sheet(isPresented: $showEmailRecipients) {
-            EmailRecipientsSheet(initialEmail: draft.recipientEmail) { emails in
-                performEmailSend(emails: emails)
+            EmailRecipientsSheet(initialEmail: draft.recipientEmail) { entries in
+                performEmailSend(entries: entries)
             }
         }
         .sheet(isPresented: $showMessageComposer) {
             if let result = cardSendResult {
                 MessageComposeView(
                     teaserImage: teaserImage,
+                    backImage: backRenderImage,
                     cardURL: result.cardURL,
-                    recipients: pendingMessageRecipients,
+                    recipients: pendingMessageRecipients.map(\.value),
                     cardID: result.cardID,
+                    senderNickname: draft.senderNickname.isEmpty ? nil : draft.senderNickname,
                     onSent: {
                         Task {
-                            await insertMessageRecipients(recipients: pendingMessageRecipients, cardID: result.cardID)
+                            await insertMessageRecipients(entries: pendingMessageRecipients, cardID: result.cardID)
                             onSaveSent()
                             onFinish()
                         }
@@ -389,8 +278,8 @@ struct SendOptionsView: View {
             }
         }
         .sheet(isPresented: $showMessageRecipients) {
-            MessageRecipientsSheet(initialRecipient: draft.recipientPhone.isEmpty ? draft.recipientEmail : draft.recipientPhone) { recipients in
-                performTextSend(recipients: recipients)
+            MessageRecipientsSheet(initialRecipient: draft.recipientPhone.isEmpty ? draft.recipientEmail : draft.recipientPhone) { entries in
+                performTextSend(entries: entries)
             }
         }
         .sheet(isPresented: $showStorageUpgrade) {
@@ -398,18 +287,101 @@ struct SendOptionsView: View {
                 authManager.setTierUnlimited()
             }
         }
+        } // end GeometryReader
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Print and Mail — anchored directly above "Send Digitally"
+                // rather than scrolling with the rest of the List; padded
+                // below so it doesn't graze "Send Digitally" underneath it.
+                Text("Print and Mail")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.brandBlue)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, 16)
 
-        // Finish button
-        Button(action: handleFinish) {
-            Text("Finish")
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color.brandBlue)
-                .foregroundColor(.white)
-                .cornerRadius(12)
+                Group {
+                    if authManager.isAnonymous {
+                        sendRow(
+                            icon: "photo",
+                            title: "Mail Real Postcard",
+                            subtitle: "Create Account to Mail Real Postcards",
+                            color: .brandBlue
+                        ) { showCreateAccount = true }
+                    } else {
+                        // Account exists, so "Create Account" no longer applies —
+                        // Mail Real Postcard becomes reachable in principle, but
+                        // isn't wired to anything yet.
+                        comingSoonRow(icon: "photo", title: "Mail Real Postcard",
+                                      subtitle: "Printed & mailed for you")
+                    }
+                }
+                .padding(.horizontal, 16)
+                .background(Color(uiColor: .secondarySystemGroupedBackground))
+                .cornerRadius(16)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+
+                // Send Digitally — anchored directly above Finish rather than
+                // scrolling with the rest of the List.
+                Text("Send Digitally — Free")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.brandBlue)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, 16)
+
+                VStack(spacing: 0) {
+                    sendRow(
+                        icon: "envelope",
+                        title: "Email",
+                        subtitle: "Send as an interactive postcard",
+                        color: .blue
+                    ) { sendEmail() }
+                    .padding(.horizontal, 16)
+
+                    Divider().padding(.leading, 66)
+
+                    sendRow(
+                        icon: "message",
+                        title: "Text Message",
+                        subtitle: "Send via Messages",
+                        color: .green
+                    ) { sendText() }
+                    .padding(.horizontal, 16)
+                }
+                .background(Color(uiColor: .secondarySystemGroupedBackground))
+                .cornerRadius(16)
+                .padding(.horizontal, 16)
+
+                if !authManager.hasPermanentStorage && !authManager.isAnonymous && authManager.isEmailVerified {
+                    sendRow(
+                        icon: "archivebox",
+                        title: "Cards expire after 30 days",
+                        subtitle: "Upgrade once for permanent storage — $9.99",
+                        color: .purple
+                    ) { showStorageUpgrade = true }
+                    .padding(.horizontal, 16)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground))
+                    .cornerRadius(16)
+                    .padding(.horizontal, 16)
+                }
+
+                // Finish button
+                Button(action: handleFinish) {
+                    Text("Finish")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(Color.brandBlue)
+                        .foregroundColor(.white)
+                        .cornerRadius(999)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+            }
+            .padding(.top, 8)
+            .background(Color(uiColor: .systemGroupedBackground))
         }
-        .padding(.horizontal)
-        .padding(.vertical, 12)
 
         } // VStack
         .alert("No Photo", isPresented: $showMissingPhotoAlert) {
@@ -481,8 +453,10 @@ struct SendOptionsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+                Spacer(minLength: 0)
             }
-            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 10)
         }
     }
 
@@ -507,7 +481,7 @@ struct SendOptionsView: View {
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Render + share
@@ -545,25 +519,69 @@ struct SendOptionsView: View {
         }
     }
 
-    private func performEmailSend(emails: [String]) {
+    /// Splits a full name (e.g. from a contact lookup) into first/last, matching the
+    /// convention used for the To/From step's recipient fields.
+    private func splitName(_ name: String) -> (first: String, last: String) {
+        let parts = name.components(separatedBy: " ").filter { !$0.isEmpty }
+        return (parts.first ?? "", parts.dropFirst().joined(separator: " "))
+    }
+
+    private func performEmailSend(entries: [RecipientContact]) {
         Task { @MainActor in
             await uploadAndSend {
-                pendingEmailRecipients = emails
-                if MFMailComposeViewController.canSendMail() { showMailComposer = true }
+                pendingEmailRecipients = entries
+                if MFMailComposeViewController.canSendMail() {
+                    showMailComposer = true
+                } else if isRunningInSimulator, let result = cardSendResult {
+                    // Simulator can't present the Mail composer at all, so the
+                    // real device completion path (MailComposeView's onSent)
+                    // never fires and the card would silently never flip to
+                    // .sent. The upload above already succeeded for real —
+                    // finish the same way onSent would, just skipping the
+                    // composer UI itself.
+                    Task {
+                        await insertEmailRecipients(entries: pendingEmailRecipients, cardID: result.cardID)
+                        onSaveSent()
+                        onFinish()
+                    }
+                }
             }
         }
     }
 
-    private func insertEmailRecipients(emails: [String], cardID: UUID) async {
+    private func insertEmailRecipients(entries: [RecipientContact], cardID: UUID) async {
         struct Row: Encodable {
             let card_id: String
             let email: String
+            let first_name: String?
+            let last_name: String?
+            let nickname: String?
+            let send_method: String
         }
-        for email in emails {
+        let nickname = draft.recipientNickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        for entry in entries {
+            let (first, last) = splitName(entry.name)
+            let row = Row(
+                card_id: cardID.uuidString,
+                email: entry.value,
+                first_name: first.isEmpty ? nil : first,
+                last_name: last.isEmpty ? nil : last,
+                nickname: nickname.isEmpty ? nil : nickname,
+                send_method: "email"
+            )
             try? await supabase
                 .from("card_recipients")
-                .insert(Row(card_id: cardID.uuidString, email: email))
+                .insert(row)
                 .execute()
+            addressBook.saveIfNew(
+                name: entry.name,
+                nickname: nickname,
+                address: "",
+                email: entry.value,
+                phone: "",
+                role: .recipient,
+                nameIsAuthoritative: entry.isFromContactPicker
+            )
         }
     }
 
@@ -580,32 +598,62 @@ struct SendOptionsView: View {
         }
     }
 
-    private func performTextSend(recipients: [String]) {
+    private func performTextSend(entries: [RecipientContact]) {
         Task { @MainActor in
             await uploadAndSend {
-                pendingMessageRecipients = recipients
-                if MFMessageComposeViewController.canSendText() { showMessageComposer = true }
+                pendingMessageRecipients = entries
+                if MFMessageComposeViewController.canSendText() {
+                    showMessageComposer = true
+                } else if isRunningInSimulator, let result = cardSendResult {
+                    // See matching comment in performEmailSend — Simulator
+                    // can't present the Messages composer, so mimic
+                    // MessageComposeView's onSent completion directly.
+                    Task {
+                        await insertMessageRecipients(entries: pendingMessageRecipients, cardID: result.cardID)
+                        onSaveSent()
+                        onFinish()
+                    }
+                }
             }
         }
     }
 
-    private func insertMessageRecipients(recipients: [String], cardID: UUID) async {
+    private func insertMessageRecipients(entries: [RecipientContact], cardID: UUID) async {
         struct Row: Encodable {
             let card_id: String
             let email: String?
             let phone: String?
+            let first_name: String?
+            let last_name: String?
+            let nickname: String?
+            let send_method: String
         }
-        for recipient in recipients {
-            let isEmail = recipient.contains("@")
+        let nickname = draft.recipientNickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        for entry in entries {
+            let isEmail = entry.value.contains("@")
+            let (first, last) = splitName(entry.name)
             let row = Row(
                 card_id: cardID.uuidString,
-                email: isEmail ? recipient : nil,
-                phone: isEmail ? nil : recipient
+                email: isEmail ? entry.value : nil,
+                phone: isEmail ? nil : entry.value,
+                first_name: first.isEmpty ? nil : first,
+                last_name: last.isEmpty ? nil : last,
+                nickname: nickname.isEmpty ? nil : nickname,
+                send_method: "text"
             )
             try? await supabase
                 .from("card_recipients")
                 .insert(row)
                 .execute()
+            addressBook.saveIfNew(
+                name: entry.name,
+                nickname: nickname,
+                address: "",
+                email: isEmail ? entry.value : "",
+                phone: isEmail ? "" : entry.value,
+                role: .recipient,
+                nameIsAuthoritative: entry.isFromContactPicker
+            )
         }
     }
 
@@ -619,8 +667,18 @@ struct SendOptionsView: View {
 
         guard let frontData = draftManager.loadFrontData(for: draft.cardID),
               let backData  = draftManager.loadBackData(for: draft.cardID) else { return }
+        let back6x9Data = draftManager.loadBack6x9Data(for: draft.cardID)
 
         teaserImage = draftManager.loadFront(for: draft.cardID)
+
+        // Same fanned front+back composite used as the SMS attachment,
+        // uploaded here so email can reference it by URL instead — an
+        // embedded cid: attachment doesn't render reliably across mail
+        // clients (confirmed broken in Gmail).
+        let compositeData: Data? = {
+            guard let front = teaserImage, let back = backRenderImage else { return nil }
+            return PostcardHTMLGenerator.stackedThumbnail(front: front, back: back).jpegData(compressionQuality: 0.8)
+        }()
 
         // Upload + call Edge Function
         isSending = true
@@ -632,6 +690,8 @@ struct SendOptionsView: View {
                 cardID: draft.cardID,
                 frontData: frontData,
                 backData: backData,
+                back6x9Data: back6x9Data,
+                compositeData: compositeData,
                 frontIsPortrait: draft.orientation == .portrait,
                 frontInkMessage: frontInk,
                 backInkMessage: backInk,
@@ -665,10 +725,11 @@ struct SendOptionsView: View {
 // MARK: - Mail composer bridge
 
 struct MailComposeView: UIViewControllerRepresentable {
-    var teaserImage: UIImage?
+    var compositeImageURL: URL?
     var cardURL: URL
     var recipientEmails: [String]
     var cardID: UUID
+    var senderNickname: String?
     var onSent: () -> Void
     var onFailed: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -677,21 +738,28 @@ struct MailComposeView: UIViewControllerRepresentable {
         let vc = MFMailComposeViewController()
         vc.mailComposeDelegate = context.coordinator
         if !recipientEmails.isEmpty { vc.setToRecipients(recipientEmails) }
-        vc.setSubject("You got a CardDrop")
+        let from = senderNickname?.isEmpty == false ? senderNickname! : "You"
+        vc.setSubject("\(from) sent a CardDrop")
+
+        // Hosted image (uploaded alongside front/back at send time — see
+        // CardUploadService.send's compositeData param), not an embedded
+        // cid: attachment: cid: references don't render reliably across
+        // mail clients (confirmed broken in Gmail), whereas a plain hosted
+        // <img src> works everywhere, same as the front/back teaser images.
         let url = cardURL.absoluteString
-        let base = SupabaseConfig.projectURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let imgSrc = "\(base)/storage/v1/object/public/teaser-images/\(cardID.uuidString).jpg"
+        let imageTag = compositeImageURL.map {
+            """
+            <a href="\(url)" style="display:block;text-decoration:none;">
+              <img src="\($0.absoluteString)" style="max-width:100%;border-radius:10px;display:block;margin:0 auto 20px;" />
+            </a>
+            """
+        } ?? ""
         let html = """
         <html>
-        <body style="font-family:-apple-system,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#222;">
-        <p style="font-size:13px;margin-bottom:4px;text-align:center;">A <span style="font-weight:700;color:#0066FF;">Card<span style="vertical-align:-4px;">Drop</span></span> postcard is waiting for you</p>
-        <p style="font-size:13px;margin-bottom:20px;text-align:center;color:#0066FF;">Tap to open it</p>
-        <a href="\(url)" style="display:block;text-decoration:none;">
-          <img src="\(imgSrc)" style="width:100%;max-width:560px;border-radius:10px;display:block;" />
-        </a>
-        <p style="margin-top:16px;font-size:14px;">
-          <a href="\(url)" style="color:#0066FF;">View your postcard →</a>
-        </p>
+        <body style="font-family:-apple-system,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#222;text-align:center;">
+        \(imageTag)
+        <p style="font-size:15px;margin:0 0 12px;">Tap to open it</p>
+        <p style="font-size:14px;margin:0;"><a href="\(url)" style="color:#0066FF;">\(url)</a></p>
         </body>
         </html>
         """
@@ -725,9 +793,11 @@ struct MailComposeView: UIViewControllerRepresentable {
 
 struct MessageComposeView: UIViewControllerRepresentable {
     var teaserImage: UIImage?
+    var backImage: UIImage?
     var cardURL: URL
     var recipients: [String]
     var cardID: UUID
+    var senderNickname: String?
     var onSent: () -> Void
     var onFailed: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -736,10 +806,14 @@ struct MessageComposeView: UIViewControllerRepresentable {
         let vc = MFMessageComposeViewController()
         vc.messageComposeDelegate = context.coordinator
         if !recipients.isEmpty { vc.recipients = recipients }
-        vc.body = "You got a CardDrop postcard\nTap to open it\n\n\(cardURL.absoluteString)"
-        if let img = teaserImage,
-           let data = PostcardHTMLGenerator.scaledForMMS(img).jpegData(compressionQuality: 0.7) {
-            vc.addAttachmentData(data, typeIdentifier: "public.jpeg", filename: "postcard.jpg")
+        let from = senderNickname?.isEmpty == false ? senderNickname! : "You"
+        vc.body = "\(from) sent a CardDrop\nTap to open it.\n\n\n\(cardURL.absoluteString)"
+        if let img = teaserImage {
+            let thumbnail = backImage.map { PostcardHTMLGenerator.stackedThumbnail(front: img, back: $0) }
+                ?? PostcardHTMLGenerator.scaledForThumbnail(img)
+            if let data = thumbnail.jpegData(compressionQuality: 0.7) {
+                vc.addAttachmentData(data, typeIdentifier: "public.jpeg", filename: "postcard.jpg")
+            }
         }
         return vc
     }
@@ -843,93 +917,6 @@ struct CardChecklistView: View {
     }
 }
 
-// MARK: - Card Flip Preview Sheet
-
-struct CardFlipPreviewSheet: View {
-    let frontImage: UIImage?
-    let backImage: UIImage?
-    let aspectRatio: CGFloat
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var showingFront = true
-    @State private var scaleX: CGFloat = 1.0
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            GeometryReader { geo in
-                let frontFrame = cardFrame(in: geo.size, ratio: aspectRatio)
-                let backFrame  = cardFrame(in: geo.size, ratio: 6.0 / 4.0)
-                let frame      = showingFront ? frontFrame : backFrame
-
-                VStack(spacing: 12) {
-                    Spacer()
-                    Group {
-                        if showingFront {
-                            if let img = frontImage {
-                                Image(uiImage: img)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: frame.width, height: frame.height)
-                            } else {
-                                ProgressView().frame(width: frame.width, height: frame.height)
-                            }
-                        } else {
-                            if let img = backImage {
-                                Image(uiImage: img)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: frame.width, height: frame.height)
-                            } else {
-                                ProgressView().frame(width: frame.width, height: frame.height)
-                            }
-                        }
-                    }
-                    .compositingGroup()
-                    .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 6)
-                    .scaleEffect(x: scaleX, y: 1)
-                    .onTapGesture { flip() }
-
-                    Text(showingFront ? "Tap to see the back" : "Tap to see the front")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
-                .frame(width: geo.size.width, height: geo.size.height)
-            }
-
-            Button(action: { dismiss() }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .padding(10)
-                    .background(Color(.systemGray5))
-                    .clipShape(Circle())
-            }
-            .padding(.top, 16)
-            .padding(.leading, 16)
-        }
-    }
-
-    private func flip() {
-        withAnimation(.easeIn(duration: 0.18)) { scaleX = 0 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            showingFront.toggle()
-            withAnimation(.easeOut(duration: 0.18)) { scaleX = 1 }
-        }
-    }
-
-    private func cardFrame(in available: CGSize, ratio: CGFloat) -> CGSize {
-        let maxW = available.width - 48
-        let maxH = available.height - 120
-        if ratio >= 1 {
-            let w = min(maxW, maxH * ratio)
-            return CGSize(width: w, height: w / ratio)
-        } else {
-            let h = min(maxH, maxW / ratio)
-            return CGSize(width: h * ratio, height: h)
-        }
-    }
-}
 
 // MARK: - Custom Text Border
 
@@ -1058,22 +1045,36 @@ struct CustomTextBorderView: View {
 
 private struct SlotIndex: Identifiable { let id: Int }
 
+/// A digital-send recipient captured from either free-text entry or a contact lookup.
+/// `name` is empty when the recipient was typed in rather than picked from Contacts.
+/// `isFromContactPicker` is true only when `value` still matches what the picker set —
+/// if the user edits the field afterward, it self-corrects to false since the two no
+/// longer match, and `name` should then be treated as stale/unreliable.
+struct RecipientContact {
+    let name: String
+    let value: String
+    let isFromContactPicker: Bool
+}
+
 struct EmailRecipientsSheet: View {
     let initialEmail: String
-    var onSend: ([String]) -> Void
+    var onSend: ([RecipientContact]) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var emails: [String]
+    @State private var names: [String]
+    @State private var contactPickedEmails: [Int: String] = [:]
     @State private var pickerSlot: SlotIndex? = nil
 
     private let slotCount = 6
 
-    init(initialEmail: String, onSend: @escaping ([String]) -> Void) {
+    init(initialEmail: String, onSend: @escaping ([RecipientContact]) -> Void) {
         self.initialEmail = initialEmail
         self.onSend = onSend
         var arr = Array(repeating: "", count: 6)
         if !initialEmail.isEmpty { arr[0] = initialEmail }
         _emails = State(initialValue: arr)
+        _names = State(initialValue: Array(repeating: "", count: 6))
     }
 
     private func isValidEmail(_ s: String) -> Bool {
@@ -1083,10 +1084,17 @@ struct EmailRecipientsSheet: View {
         return t.range(of: pattern, options: .regularExpression) != nil
     }
 
-    private var validEmails: [String] {
-        emails
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && isValidEmail($0) }
+    private var validEntries: [RecipientContact] {
+        emails.indices.compactMap { index in
+            let trimmedEmail = emails[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedEmail.isEmpty, isValidEmail(trimmedEmail) else { return nil }
+            let isFromPicker = contactPickedEmails[index] == trimmedEmail
+            return RecipientContact(
+                name: names[index].trimmingCharacters(in: .whitespacesAndNewlines),
+                value: trimmedEmail,
+                isFromContactPicker: isFromPicker
+            )
+        }
     }
 
     private var hasInvalidEntry: Bool {
@@ -1105,6 +1113,8 @@ struct EmailRecipientsSheet: View {
                     }
                 } header: {
                     Text("To")
+                        .font(.system(size: 13, weight: .regular))
+                        .textCase(.none)
                 } footer: {
                     if hasInvalidEntry {
                         Text("Fix invalid email addresses before sending.")
@@ -1115,21 +1125,19 @@ struct EmailRecipientsSheet: View {
             .navigationTitle("Send via Email")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Send") {
-                        onSend(validEmails)
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                    .disabled(hasInvalidEntry)
+                toolbarPillItem("Cancel", placement: .cancellationAction, style: .bare) { dismiss() }
+                toolbarPillItem("Send", placement: .confirmationAction, emphasis: .primary, style: .bare, isDisabled: hasInvalidEntry) {
+                    onSend(validEntries)
+                    dismiss()
                 }
             }
             .sheet(item: $pickerSlot) { slot in
-                ContactPickerView { _, _, email, _ in
-                    if !email.isEmpty { emails[slot.id] = email }
+                ContactPickerView { name, _, email, _ in
+                    if !email.isEmpty {
+                        emails[slot.id] = email
+                        names[slot.id] = name
+                        contactPickedEmails[slot.id] = email
+                    }
                 }
             }
         }
@@ -1166,20 +1174,23 @@ struct EmailRecipientsSheet: View {
 
 struct MessageRecipientsSheet: View {
     let initialRecipient: String
-    var onSend: ([String]) -> Void
+    var onSend: ([RecipientContact]) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var recipients: [String]
+    @State private var names: [String]
+    @State private var contactPickedValues: [Int: String] = [:]
     @State private var pickerSlot: SlotIndex? = nil
 
     private let slotCount = 6
 
-    init(initialRecipient: String, onSend: @escaping ([String]) -> Void) {
+    init(initialRecipient: String, onSend: @escaping ([RecipientContact]) -> Void) {
         self.initialRecipient = initialRecipient
         self.onSend = onSend
         var arr = Array(repeating: "", count: 6)
         if !initialRecipient.isEmpty { arr[0] = initialRecipient }
         _recipients = State(initialValue: arr)
+        _names = State(initialValue: Array(repeating: "", count: 6))
     }
 
     private func isValidEmail(_ s: String) -> Bool {
@@ -1200,10 +1211,17 @@ struct MessageRecipientsSheet: View {
         return t.contains("@") ? isValidEmail(t) : isValidPhone(t)
     }
 
-    private var validRecipients: [String] {
-        recipients
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && isValid($0) }
+    private var validEntries: [RecipientContact] {
+        recipients.indices.compactMap { index in
+            let trimmed = recipients[index].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, isValid(trimmed) else { return nil }
+            let isFromPicker = contactPickedValues[index] == trimmed
+            return RecipientContact(
+                name: names[index].trimmingCharacters(in: .whitespacesAndNewlines),
+                value: trimmed,
+                isFromContactPicker: isFromPicker
+            )
+        }
     }
 
     private var hasInvalidEntry: Bool {
@@ -1222,6 +1240,8 @@ struct MessageRecipientsSheet: View {
                     }
                 } header: {
                     Text("To")
+                        .font(.system(size: 13, weight: .regular))
+                        .textCase(.none)
                 } footer: {
                     if hasInvalidEntry {
                         Text("Fix invalid entries before sending.")
@@ -1235,22 +1255,20 @@ struct MessageRecipientsSheet: View {
             .navigationTitle("Send via Messages")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Send") {
-                        onSend(validRecipients)
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                    .disabled(hasInvalidEntry)
+                toolbarPillItem("Cancel", placement: .cancellationAction, style: .bare) { dismiss() }
+                toolbarPillItem("Send", placement: .confirmationAction, emphasis: .primary, style: .bare, isDisabled: hasInvalidEntry) {
+                    onSend(validEntries)
+                    dismiss()
                 }
             }
             .sheet(item: $pickerSlot) { slot in
-                ContactPickerView { _, _, email, phone in
+                ContactPickerView { name, _, email, phone in
                     let value = phone.isEmpty ? email : phone
-                    if !value.isEmpty { recipients[slot.id] = value }
+                    if !value.isEmpty {
+                        recipients[slot.id] = value
+                        names[slot.id] = name
+                        contactPickedValues[slot.id] = value
+                    }
                 }
             }
         }
@@ -1284,5 +1302,9 @@ struct MessageRecipientsSheet: View {
 }
 
 #Preview {
-    PreviewSendStepView(draft: PostcardDraft(), filteredImage: nil, originalStatus: .unsent, onNext: {})
+    SendOptionsView(
+        draft: PostcardDraft(), filteredImage: nil, originalStatus: .unsent, hasDraftSaved: false,
+        onSaveUnsent: {}, onSaveSent: {}, onGoToFront: {}, onGoToBack: {}, onGoToAddress: {}, onFinish: {},
+        onSendToSomeoneElse: {}, onEditCard: {}
+    )
 }

@@ -39,7 +39,7 @@ struct EmailVerificationBanner: View {
                     .padding(.vertical, 5)
                     .background(.white.opacity(0.25))
                     .foregroundColor(.white)
-                    .cornerRadius(6)
+                    .cornerRadius(999)
                 }
 
                 Button {

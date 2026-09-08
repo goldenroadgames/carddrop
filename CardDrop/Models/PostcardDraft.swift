@@ -48,6 +48,7 @@ class PostcardDraft: ObservableObject {
     @Published var decorativePresetID: String = ""
     @Published var textOverlays: [TextOverlay] = []
     @Published var burstOverlays: [BurstCaptionOverlay] = []
+    @Published var greetingsOverlays: [GreetingsOverlay] = []
     @Published var qrOverlays: [QROverlay] = [] {
         didSet { moderationState = .untested }
     }
@@ -141,6 +142,7 @@ class PostcardDraft: ObservableObject {
         c.decorativePresetID = decorativePresetID
         c.textOverlays       = textOverlays
         c.burstOverlays      = burstOverlays
+        c.greetingsOverlays  = greetingsOverlays
         c.qrOverlays         = qrOverlays
         c.senderNickname     = senderNickname
         c.message            = message
@@ -166,7 +168,35 @@ class PostcardDraft: ObservableObject {
         c.qrCodeContent      = qrCodeContent
         c.includeBackMessageQR  = includeBackMessageQR
         c.backMessageQRContent  = backMessageQRContent
-        // recipient fields intentionally left blank
+        // Formal recipient name/address/email/phone are intentionally left
+        // blank — a copy is likely headed to a different/uncertain recipient.
+        // The "To" nickname carries over though, since it's just the card's
+        // starting text and the common case is re-sending the same card.
+        c.recipientNickname  = recipientNickname
+        return c
+    }
+
+    /// Returns a new unsent draft that's a precise replica of a sent card —
+    /// every field copied, including the "To" nickname, greeting text, and
+    /// whatever recipient contact info (formal name/address/email/phone) was
+    /// captured via the contact picker. Used for "Copy & Edit" on an already-
+    /// sent card, where the point is to reopen exactly what was sent (in
+    /// Style It) rather than start over with a blank recipient — unlike
+    /// cloneForNewRecipient(), which is for actually sending to someone new.
+    /// The clone still gets a fresh cardID so it's independent of the original.
+    func cloneExact() -> PostcardDraft {
+        let c = cloneForNewRecipient()
+        c.greetingSalutation   = greetingSalutation
+        c.greetingClosing      = greetingClosing
+        c.recipientFirstName   = recipientFirstName
+        c.recipientLastName    = recipientLastName
+        c.recipientStreet      = recipientStreet
+        c.recipientCity        = recipientCity
+        c.recipientState       = recipientState
+        c.recipientZip         = recipientZip
+        c.recipientCountry     = recipientCountry
+        c.recipientEmail       = recipientEmail
+        c.recipientPhone       = recipientPhone
         return c
     }
 
@@ -185,9 +215,18 @@ class PostcardDraft: ObservableObject {
         let scaledWidth = imageSize.width * totalScale
         let scaledHeight = imageSize.height * totalScale
 
+        // imageOffset is stored NORMALIZED (fraction of canvas width/height
+        // dragged), not raw points — it has to be, since it's set from a
+        // small live-editor-canvas DragGesture but consumed here at
+        // whatever `size` this is being baked at (the live editor's own
+        // small canvas for the live preview, or the full 2700x1800 print
+        // canvas for the composedImage bake). Raw, unnormalized points
+        // captured at editor scale would end up a negligible fraction of a
+        // canvas ~8x larger. See TextOverlayStepView's matching drag/live
+        // display code for the other half of this convention.
         let drawRect = CGRect(
-            x: (size.width - scaledWidth) / 2 + imageOffset.width,
-            y: (size.height - scaledHeight) / 2 + imageOffset.height,
+            x: (size.width - scaledWidth) / 2 + imageOffset.width * size.width,
+            y: (size.height - scaledHeight) / 2 + imageOffset.height * size.height,
             width: scaledWidth,
             height: scaledHeight
         )
@@ -195,6 +234,18 @@ class PostcardDraft: ObservableObject {
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
             ctx.cgContext.clip(to: CGRect(origin: .zero, size: size))
+            // Fill a backdrop color first — if the drag/zoom leaves the photo
+            // not fully covering `size` (e.g. dragged/positioned such that an
+            // edge is exposed), that gap must render as something solid in
+            // the saved output, not transparent/undefined (JPEG has no
+            // alpha, so an unfilled gap would otherwise composite
+            // unpredictably). Opaque white by default; if a Greetings badge
+            // is present, match its own badge background color instead, so
+            // an exposed gap reads as an intentional matching color rather
+            // than a jarring mismatch against the badge.
+            let backdropColor: UIColor = greetingsOverlays.first.map { UIColor($0.badgeColorChoice.color) } ?? .white
+            backdropColor.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
             image.draw(in: drawRect)
         }
     }

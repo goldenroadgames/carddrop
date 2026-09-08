@@ -35,7 +35,7 @@ struct HomeView: View {
                         .padding()
                         .background(Color.brandBlue)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(999)
                     }
                     .padding(.horizontal)
 
@@ -92,12 +92,12 @@ struct HomeView: View {
             if !authManager.isAnonymous && !authManager.isEmailVerified {
                 Button(action: { showOTPVerification = true }) {
                     Text("Verify your email for unlimited sending")
-                        .fontWeight(.semibold)
+                        .font(.system(size: 17, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(Color.brandBlue)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(999)
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 12)
@@ -105,12 +105,12 @@ struct HomeView: View {
             } else if authManager.isAnonymous {
                 Button(action: { showSignInGate = true }) {
                     Text("Create an account for unlimited sending")
-                        .fontWeight(.semibold)
+                        .font(.system(size: 17, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(Color.brandBlue)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(999)
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 12)

@@ -65,14 +65,14 @@ struct OTPVerificationView: View {
                                         .padding(.vertical, 14)
                                 } else {
                                     Text("Verify")
-                                        .fontWeight(.semibold)
+                                        .font(.system(size: 17, weight: .semibold))
                                         .frame(maxWidth: .infinity)
                                         .padding(.vertical, 14)
                                 }
                             }
                             .background(Color.brandBlue)
                             .foregroundColor(.white)
-                            .cornerRadius(12)
+                            .cornerRadius(999)
                             .disabled(otpCode.count < 6 || isVerifying)
 
                             Button("Resend code") { sendCode() }
@@ -81,12 +81,12 @@ struct OTPVerificationView: View {
                         } else {
                             Button(action: sendCode) {
                                 Text("Send Code")
-                                    .fontWeight(.semibold)
+                                    .font(.system(size: 17, weight: .semibold))
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 14)
                                     .background(Color.brandBlue)
                                     .foregroundColor(.white)
-                                    .cornerRadius(12)
+                                    .cornerRadius(999)
                             }
                         }
 
@@ -108,9 +108,7 @@ struct OTPVerificationView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { onCancel(); dismiss() }
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction) { onCancel(); dismiss() }
             }
             .onAppear {
                 otpEmail = authManager.currentUserEmail ?? ""
@@ -202,12 +200,12 @@ struct CorrectEmailView: View {
 
                     Button(action: confirm) {
                         Text("Update and Verify")
-                            .fontWeight(.semibold)
+                            .font(.system(size: 17, weight: .semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
                             .background(Color.brandBlue)
                             .foregroundColor(.white)
-                            .cornerRadius(12)
+                            .cornerRadius(999)
                     }
                     .disabled(newEmail.isEmpty || newEmail == currentEmail)
                 }
@@ -217,9 +215,7 @@ struct CorrectEmailView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction) { dismiss() }
             }
         }
         .dynamicTypeSize(.medium ... .xxxLarge)

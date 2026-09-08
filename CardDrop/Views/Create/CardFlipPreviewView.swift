@@ -26,6 +26,7 @@ struct CardFlipPreviewView: View {
                                 overlays: draft.textOverlays,
                                 qrOverlays: draft.qrOverlays,
                                 burstOverlays: draft.burstOverlays,
+                                greetingsOverlays: draft.greetingsOverlays,
                                 size: frontFrame
                             )
                             .frame(width: frontFrame.width, height: frontFrame.height)
@@ -51,19 +52,39 @@ struct CardFlipPreviewView: View {
             .navigationTitle(showingFront ? "Front" : "Back")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-                ToolbarItem(placement: .bottomBar) {
-                    Button { flip() } label: {
-                        Label(
-                            showingFront ? "Flip to Back" : "Flip to Front",
-                            systemImage: "arrow.left.arrow.right"
-                        )
-                    }
-                }
+                toolbarPillItem("Done", placement: .confirmationAction, emphasis: .primary) { dismiss() }
+                flipToolbarItem
             }
         }
+    }
+
+    // Custom pill (icon + dynamic "Flip to Back/Front" label) — not a plain
+    // ToolbarPillButton, so the iOS 26 shared-glass opt-out is applied here
+    // by hand instead of via toolbarPillItem.
+    @ToolbarContentBuilder
+    private var flipToolbarItem: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .bottomBar) { flipButtonLabel }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .bottomBar) { flipButtonLabel }
+        }
+    }
+
+    private var flipButtonLabel: some View {
+        Button(action: flip) {
+            Label(
+                showingFront ? "Flip to Back" : "Flip to Front",
+                systemImage: "arrow.left.arrow.right"
+            )
+            .font(.system(size: 15, weight: .medium))
+            .foregroundColor(.primary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color(.systemGray5))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private func flip() {

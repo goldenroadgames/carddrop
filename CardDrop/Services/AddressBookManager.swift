@@ -31,24 +31,54 @@ class AddressBookManager: ObservableObject {
 
     // MARK: - Public API
 
-    func saveIfNew(name: String, address: String, email: String = "", phone: String = "", role: AddressRole) {
+    /// Insert or update an address-book entry. Matches an existing entry by phone, then
+    /// email, then name (in that order) so a digital-only contact (no name yet, just a
+    /// typed phone/email) can later be matched and filled in by a contact lookup.
+    ///
+    /// `nameIsAuthoritative` distinguishes where the name came from:
+    /// - `true` (a Contacts lookup was used for this send): the contact is the source of
+    ///   truth, so `name` replaces the stored name outright — even if it's blank (e.g. the
+    ///   contact only has a first name).
+    /// - `false` (default — the value was typed in manually): `name` is ignored entirely,
+    ///   so a manually-entered phone/email on a later send never blanks out a name that
+    ///   was already captured from a previous contact lookup.
+    ///
+    /// Address/email/phone always follow the non-destructive rule: only overwrite a
+    /// non-empty existing field when the new value is itself non-empty.
+    func saveIfNew(name: String, nickname: String = "", address: String, email: String = "", phone: String = "", role: AddressRole, nameIsAuthoritative: Bool = false) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAddr = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return }
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty || !trimmedEmail.isEmpty || !trimmedPhone.isEmpty else { return }
 
-        if let idx = addresses.firstIndex(where: {
-            $0.name.caseInsensitiveCompare(trimmedName) == .orderedSame
-        }) {
+        let normalizedPhone = Self.normalizedDigits(trimmedPhone)
+
+        let matchIdx = addresses.firstIndex(where: { existing in
+            if !normalizedPhone.isEmpty, Self.normalizedDigits(existing.phone) == normalizedPhone { return true }
+            if !trimmedEmail.isEmpty, existing.email.caseInsensitiveCompare(trimmedEmail) == .orderedSame { return true }
+            if !trimmedName.isEmpty, existing.name.caseInsensitiveCompare(trimmedName) == .orderedSame { return true }
+            return false
+        })
+
+        if let idx = matchIdx {
             switch role {
             case .sender:    addresses[idx].usedAsSender = true
             case .recipient: addresses[idx].usedAsRecipient = true
             }
+            if nameIsAuthoritative {
+                addresses[idx].name = trimmedName
+            } else if addresses[idx].name.isEmpty, !trimmedName.isEmpty {
+                addresses[idx].name = trimmedName
+            }
+            if !trimmedNickname.isEmpty { addresses[idx].nickname = trimmedNickname }
             if !trimmedAddr.isEmpty { addresses[idx].address = trimmedAddr }
-            if !email.isEmpty { addresses[idx].email = email }
-            if !phone.isEmpty { addresses[idx].phone = phone }
+            if !trimmedEmail.isEmpty { addresses[idx].email = trimmedEmail }
+            if !trimmedPhone.isEmpty { addresses[idx].phone = trimmedPhone }
             addresses[idx].lastUsed = Date()
         } else {
-            var entry = SavedAddress(name: trimmedName, address: trimmedAddr, email: email, phone: phone)
+            var entry = SavedAddress(name: trimmedName, nickname: trimmedNickname, address: trimmedAddr, email: trimmedEmail, phone: trimmedPhone)
             switch role {
             case .sender:    entry.usedAsSender = true
             case .recipient: entry.usedAsRecipient = true
@@ -56,6 +86,11 @@ class AddressBookManager: ObservableObject {
             addresses.append(entry)
         }
         persist()
+    }
+
+    private static func normalizedDigits(_ s: String) -> String {
+        let digits = s.filter(\.isNumber)
+        return String(digits.suffix(10))
     }
 
     func delete(_ entry: SavedAddress) {

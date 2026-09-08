@@ -81,6 +81,7 @@ struct CardRepliesPanel: View {
                     .foregroundColor(.secondary)
                     .padding(12)
             }
+            .buttonStyle(.plain)
         }
         .task {
             if let cardID = snapshot.cardID {

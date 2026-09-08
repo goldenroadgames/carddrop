@@ -11,7 +11,7 @@ struct CardDropApp: App {
     @State private var didSkipAuth = false
 
     init() {
-        registerBurstFonts()
+        registerCustomFonts()
         clearKeychainOnFreshInstall()
     }
 
@@ -31,7 +31,10 @@ struct CardDropApp: App {
                         .environmentObject(addressBook)
                 }
             }
-            .dynamicTypeSize(.medium ... .xxxLarge)
+            // Lock text to the system's standard size app-wide, ignoring the user's
+            // accessibility "Larger Text" setting — this app's layouts are pixel-tuned
+            // and don't tolerate Dynamic Type scaling.
+            .dynamicTypeSize(.large)
             .onOpenURL { url in
                 Task {
                     // User tapped the confirmation link in their email.
@@ -79,13 +82,13 @@ private func clearKeychainOnFreshInstall() {
     Task { try? await supabase.auth.signOut() }
 }
 
-// MARK: - Burst font registration
-// Registers Bangers.ttf and Creepster.ttf from the app bundle so Font.custom() can find them.
+// MARK: - Custom font registration
+// Registers bundled TTFs (burst captions + Greetings overlay script) so Font.custom() can find them.
 // The font files must be added to the Xcode project target (Build Phases > Copy Bundle Resources).
 // Typical Xcode bundle paths: root of bundle, or inside "fonts" or "Assets/fonts" subfolder.
 
-private func registerBurstFonts() {
-    let names = ["Bangers-Regular", "Creepster-Regular"]
+private func registerCustomFonts() {
+    let names = ["Bangers-Regular", "Creepster-Regular", "DancingScript-VariableFont_wght", "BowlbyOneSC-Regular"]
     let subdirs: [String?] = [nil, "fonts", "Assets/fonts"]
     for name in names {
         for subdir in subdirs {

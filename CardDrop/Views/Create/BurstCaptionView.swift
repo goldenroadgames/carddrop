@@ -210,9 +210,9 @@ struct BurstStyleChip: View {
                 .scaleEffect(0.78)
         }
         .frame(width: 86, height: 46)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 999))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 999)
                 .stroke(isSelected ? Color.accentColor : Color.gray.opacity(0.25),
                         lineWidth: isSelected ? 2.5 : 1)
         )

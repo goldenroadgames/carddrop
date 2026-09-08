@@ -5,7 +5,7 @@ struct ProfileSectionView: View {
     @State private var showEdit = false
 
     var body: some View {
-        Section("Profile") {
+        Section {
             Button(action: { showEdit = true }) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
@@ -33,6 +33,10 @@ struct ProfileSectionView: View {
                 }
             }
             .foregroundColor(.primary)
+        } header: {
+            Text("Profile")
+                .font(.system(size: 13, weight: .regular))
+                .textCase(.none)
         }
         .sheet(isPresented: $showEdit) {
             EditProfileView()
@@ -68,9 +72,13 @@ struct EditProfileView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Name") {
+                Section {
                     TextField("First name", text: $firstName)
                         .autocapitalization(.words)
+                } header: {
+                    Text("Name")
+                        .font(.system(size: 13, weight: .regular))
+                        .textCase(.none)
                 }
 
                 Section {
@@ -92,6 +100,8 @@ struct EditProfileView: View {
                         .autocapitalization(.words)
                 } header: {
                     Text("Return Address & Phone")
+                        .font(.system(size: 13, weight: .regular))
+                        .textCase(.none)
                 } footer: {
                     Text("Auto-fills as your return address on every card. Not shared with anyone.")
                 }
@@ -99,22 +109,8 @@ struct EditProfileView: View {
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(saved ? "Saved ✓" : "Save") {
-                        authManager.saveProfile(
-                            firstName: firstName, phone: phone,
-                            street: street, city: city,
-                            state: stateField, zip: zip, country: country
-                        )
-                        saved = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { dismiss() }
-                    }
-                    .fontWeight(.semibold)
-                    .foregroundColor(saved ? .green : .accentColor)
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction) { dismiss() }
+                saveToolbarItem
             }
             .onAppear {
                 firstName  = authManager.firstName
@@ -126,5 +122,39 @@ struct EditProfileView: View {
                 country    = authManager.profileCountry
             }
         }
+    }
+
+    // Custom "Save"/"Saved ✓" — not a plain ToolbarPillButton since its color
+    // switches to green once saved, so it needs the same iOS 26 shared-glass
+    // opt-out applied by hand instead of via toolbarPillItem.
+    @ToolbarContentBuilder
+    private var saveToolbarItem: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .confirmationAction) { saveButtonLabel }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .confirmationAction) { saveButtonLabel }
+        }
+    }
+
+    private var saveButtonLabel: some View {
+        Button {
+            authManager.saveProfile(
+                firstName: firstName, phone: phone,
+                street: street, city: city,
+                state: stateField, zip: zip, country: country
+            )
+            saved = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { dismiss() }
+        } label: {
+            Text(saved ? "Saved ✓" : "Save")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(saved ? .green : .brandBlue)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color(.systemGray5))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }

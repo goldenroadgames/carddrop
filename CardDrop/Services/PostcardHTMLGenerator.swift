@@ -241,6 +241,80 @@ struct PostcardHTMLGenerator {
 
     static func scaledForMMS(_ image: UIImage) -> UIImage { downscale(image, maxDimension: 900) }
 
+    // Deliberately much smaller than scaledForMMS — this is just a small
+    // in-thread thumbnail; most recipients will see the full-size image via
+    // the URL's own rich link preview instead.
+    static func scaledForThumbnail(_ image: UIImage) -> UIImage { downscale(image, maxDimension: 300) }
+
+    // Composites the front and 4x6 back thumbnails into one "fanned photo
+    // stack" image — back peeking out lower-right, front on top, each
+    // tilted the opposite way. Used as the MMS thumbnail attachment instead
+    // of the front alone. The 4x6 back (not 6x9) is used deliberately here —
+    // it shares the front's exact physical aspect ratio/scale, whereas the
+    // 6x9 back is a genuinely larger card and would look mismatched stacked
+    // against the front at the same downscale size.
+    //
+    // UIGraphicsImageRenderer's context behaves like a normal UIKit/SwiftUI
+    // Y-DOWN coordinate space (unlike a raw CGContext, which is Y-up and
+    // needs manual flipping — see PostcardBackCanvas's Core Text drawing),
+    // so a POSITIVE angle in CGContext.rotate(by:) here is CLOCKWISE, same
+    // as SwiftUI's .rotationEffect(.degrees(positive)). Counterclockwise is
+    // therefore a negative angle.
+    static func stackedThumbnail(front: UIImage, back: UIImage) -> UIImage {
+        // 600px — sharp enough to look good in Messages' full-screen
+        // image viewer (tapping the attachment itself), nowhere near
+        // print-worthy resolution. The inline bubble size in the thread
+        // is controlled by Messages' own layout, not by this.
+        let frontSmall = downscale(front, maxDimension: 600)
+        let backSmall  = downscale(back,  maxDimension: 600)
+
+        let frontAngle: CGFloat = -10 * .pi / 180  // counterclockwise
+        let backAngle:  CGFloat =   5 * .pi / 180  // clockwise
+
+        func rotatedBounds(_ size: CGSize, angle: CGFloat) -> CGSize {
+            CGSize(
+                width:  abs(size.width * cos(angle)) + abs(size.height * sin(angle)),
+                height: abs(size.width * sin(angle)) + abs(size.height * cos(angle))
+            )
+        }
+
+        let frontBounds = rotatedBounds(frontSmall.size, angle: frontAngle)
+        let backBounds  = rotatedBounds(backSmall.size,  angle: backAngle)
+
+        // Back sits offset down-and-right of front, so it peeks out from
+        // behind once front is drawn on top of it.
+        let offset = CGSize(
+            width:  min(frontSmall.size.width,  backSmall.size.width)  * 0.22,
+            height: min(frontSmall.size.height, backSmall.size.height) * 0.22
+        )
+        let frontCenter = CGPoint.zero
+        let backCenter  = CGPoint(x: offset.width, y: offset.height)
+
+        let minX = min(frontCenter.x - frontBounds.width  / 2, backCenter.x - backBounds.width  / 2)
+        let maxX = max(frontCenter.x + frontBounds.width  / 2, backCenter.x + backBounds.width  / 2)
+        let minY = min(frontCenter.y - frontBounds.height / 2, backCenter.y - backBounds.height / 2)
+        let maxY = max(frontCenter.y + frontBounds.height / 2, backCenter.y + backBounds.height / 2)
+
+        let padding: CGFloat = 8
+        let canvasSize = CGSize(width: (maxX - minX) + padding * 2, height: (maxY - minY) + padding * 2)
+        let shift = CGPoint(x: -minX + padding, y: -minY + padding)
+
+        let renderer = UIGraphicsImageRenderer(size: canvasSize)
+        return renderer.image { ctx in
+            func draw(_ image: UIImage, center: CGPoint, angle: CGFloat) {
+                let cg = ctx.cgContext
+                cg.saveGState()
+                cg.translateBy(x: center.x + shift.x, y: center.y + shift.y)
+                cg.rotate(by: angle)
+                image.draw(in: CGRect(x: -image.size.width / 2, y: -image.size.height / 2,
+                                       width: image.size.width, height: image.size.height))
+                cg.restoreGState()
+            }
+            draw(backSmall, center: backCenter, angle: backAngle)
+            draw(frontSmall, center: frontCenter, angle: frontAngle)
+        }
+    }
+
     private static func downscale(_ image: UIImage, maxDimension: CGFloat = 1200) -> UIImage {
         let size = image.size
         let long = max(size.width, size.height)

@@ -9,15 +9,10 @@ struct MessageStepView: View {
     @ObservedObject var draft: PostcardDraft
     var onNext: () -> Void
 
-    @EnvironmentObject private var appSettings: AppSettings
-
     @FocusState private var focus: MessageField?
     @State private var isModerating = false
     @State private var flaggedCategories: [String] = []
     @State private var showHardBlockAlert = false
-    @State private var showFamilyModeAlert = false
-    @State private var showCasualWarningAlert = false
-    @State private var showFamilyModeSheet = false
 
     @State private var greetings: [CardbackGreeting] = []
     @State private var phrases: [CardbackPhrase] = []
@@ -27,28 +22,25 @@ struct MessageStepView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
 
-            if !phrases.isEmpty {
-                CompactSegmentedControl(options: Self.phraseCategories, selection: $draft.phraseCategory)
-                    .onChange(of: draft.phraseCategory) { _, _ in
-                        draft.phraseId = filteredPhrases.first?.id
-                    }
-            }
+            CompactSegmentedControl(options: Self.phraseCategories, selection: $draft.phraseCategory)
+                .opacity(phrases.isEmpty ? 0 : 1)
+                .onChange(of: draft.phraseCategory) { _, _ in
+                    draft.phraseId = filteredPhrases.first?.id
+                }
 
-            if !greetings.isEmpty {
-                CarouselRow(
-                    text: greetingPreviewText,
-                    onPrev: { stepGreeting(by: -1) },
-                    onNext: { stepGreeting(by: 1) }
-                )
-            }
+            CarouselRow(
+                text: greetingPreviewText,
+                onPrev: { stepGreeting(by: -1) },
+                onNext: { stepGreeting(by: 1) }
+            )
+            .opacity(greetings.isEmpty ? 0 : 1)
 
-            if !phrases.isEmpty {
-                CarouselRow(
-                    text: phrasePreviewText,
-                    onPrev: { stepPhrase(by: -1) },
-                    onNext: { stepPhrase(by: 1) }
-                )
-            }
+            CarouselRow(
+                text: phrasePreviewText,
+                onPrev: { stepPhrase(by: -1) },
+                onNext: { stepPhrase(by: 1) }
+            )
+            .opacity(phrases.isEmpty ? 0 : 1)
 
             // Message section
             VStack(alignment: .leading, spacing: 8) {
@@ -58,10 +50,11 @@ struct MessageStepView: View {
                         .foregroundColor(.secondary)
                         .textCase(.uppercase)
                     Spacer()
-                    Text("\(draft.message.count)/565")
+                    Text("\(draft.message.count)/525")
                         .font(.caption)
-                        .foregroundColor(draft.message.count >= 565 ? .red : .secondary)
+                        .foregroundColor(draft.message.count >= 525 ? .red : .secondary)
                 }
+                .padding(.top, 4)
 
                 ZStack(alignment: .topLeading) {
                     if draft.message.isEmpty {
@@ -71,18 +64,26 @@ struct MessageStepView: View {
                             .allowsHitTesting(false)
                     }
                     TextEditor(text: $draft.message)
-                        .font(.body)
+                        .font(.system(size: 17, weight: .regular))
                         .frame(maxHeight: .infinity)
                         .scrollContentBackground(.hidden)
                         // Counteracts TextEditor's built-in ~8pt textContainerInset,
                         // which isn't otherwise exposed to trim directly.
                         .padding(.top, -8)
                         .focused($focus, equals: .message)
+                        .toolbar {
+                            ToolbarItemGroup(placement: .keyboard) {
+                                Spacer()
+                                Button("Done") { focus = nil }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(Color.brandBlue)
+                            }
+                        }
                         .onKeyPress(.tab) { .handled }
                         .onKeyPress(.return) { .handled }
                         .onChange(of: draft.message) { _, new in
                             let cleaned = String(new.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
-                            let trimmed = cleaned.count > 565 ? String(cleaned.prefix(565)) : cleaned
+                            let trimmed = cleaned.count > 525 ? String(cleaned.prefix(525)) : cleaned
                             if trimmed != new {
                                 draft.message = trimmed
                             }
@@ -103,8 +104,13 @@ struct MessageStepView: View {
                 if draft.greetingId == nil {
                     draft.greetingId = greetings.first(where: { $0.sort_order == 0 })?.id ?? greetings.first?.id
                 }
-                updateGreetingText()
             }
+            // Always refresh (not just on first fetch) — if the "To"/"From"
+            // nickname was changed back on Style It since this view last
+            // computed greetingSalutation/Closing, arriving here needs to
+            // re-fill the greeting with the current nickname rather than
+            // leaving the stale text baked into the draft.
+            updateGreetingText()
             if phrases.isEmpty {
                 phrases = await CardBackContentService.fetchPhrases()
                 if draft.phraseId == nil {
@@ -139,18 +145,7 @@ struct MessageStepView: View {
                             onNext()
                         case .flagged(let categories):
                             flaggedCategories = categories
-                            let harassmentOnly = categories.allSatisfy {
-                                ModerationService.harassmentLabels.contains($0)
-                            }
-                            if harassmentOnly {
-                                if appSettings.familyMode {
-                                    showFamilyModeAlert = true
-                                } else {
-                                    showCasualWarningAlert = true
-                                }
-                            } else {
-                                showHardBlockAlert = true
-                            }
+                            showHardBlockAlert = true
                         }
                     }
                 } label: {
@@ -159,13 +154,14 @@ struct MessageStepView: View {
                             ProgressView().tint(.white)
                         } else {
                             Text("Next: Addresses")
+                                .font(.system(size: 17, weight: .semibold))
                         }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(Color.brandBlue)
                     .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .cornerRadius(999)
                 }
                 .disabled(isModerating)
                 .padding(.horizontal)
@@ -174,33 +170,13 @@ struct MessageStepView: View {
             .padding(.top, 12)
             .background(Color(uiColor: .systemBackground))
         }
-        // Hard block — sexual, violence, self-harm (no override)
+        // Hard block — sexual, violence, self-harm, harassment (no override)
         .alert("Content Not Allowed", isPresented: $showHardBlockAlert) {
             Button("Edit Message", role: .cancel) { }
         } message: {
             Text("Your message was flagged for: \(flaggedCategories.joined(separator: ", ")). Please revise before continuing.")
         }
-        // Harassment in Family Mode — offer settings path
-        .alert("Language Not Allowed in Family Mode", isPresented: $showFamilyModeAlert) {
-            Button("Go to Settings") { showFamilyModeSheet = true }
-            Button("Edit Message", role: .cancel) { }
-        } message: {
-            Text("Your message contains language that's blocked in Family Mode. Turn off Family Mode in Settings to allow more casual language.")
-        }
-        // Harassment in Casual Mode — warn but allow
-        .alert("That's a Little Spicy", isPresented: $showCasualWarningAlert) {
-            Button("Send Anyway") {
-                draft.moderationState = .passed
-                onNext()
-            }
-            Button("Edit Message", role: .cancel) { }
-        } message: {
-            Text("Your message contains some strong language. You can send it as-is or tone it down — your call.")
-        }
-        .sheet(isPresented: $showFamilyModeSheet) {
-            FamilyModeSettingSheet()
-                .environmentObject(appSettings)
-        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private var messageTexts: [String] {
@@ -280,28 +256,28 @@ private struct CarouselRow: View {
         HStack {
             Button(action: onPrev) {
                 Image(systemName: "chevron.left")
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: 17, weight: .regular))
                     .foregroundColor(.brandBlue)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 7)
             }
             Spacer(minLength: 8)
             Text(text)
-                .font(.subheadline)
+                .font(.system(size: 17, weight: .regular))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 3)
+                .padding(.vertical, 7)
             Spacer(minLength: 8)
             Button(action: onNext) {
                 Image(systemName: "chevron.right")
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: 17, weight: .regular))
                     .foregroundColor(.brandBlue)
-                    .padding(.vertical, 2)
+                    .padding(.vertical, 7)
             }
         }
         .padding(.horizontal, 8)
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(8)
+        .cornerRadius(999)
     }
 }
 
@@ -318,19 +294,19 @@ private struct CompactSegmentedControl: View {
                     selection = option
                 } label: {
                     Text(option)
-                        .font(.footnote.weight(selection == option ? .semibold : .regular))
+                        .font(.system(size: 17, weight: .regular))
                         .foregroundColor(selection == option ? .primary : .secondary)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, 4)
                         .background(selection == option ? Color(.systemBackground) : Color.clear)
-                        .cornerRadius(6)
+                        .cornerRadius(999)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(2)
+        .padding(3)
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(8)
+        .cornerRadius(999)
     }
 }
 

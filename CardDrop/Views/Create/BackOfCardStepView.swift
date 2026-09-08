@@ -164,12 +164,13 @@ struct BackOfCardStepView: View {
         } // end outer VStack
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Button(action: saveAddressesAndProceed) {
-                Text("Next: Preview")
+                Text("Next: Preview and Send")
+                    .font(.system(size: 17, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(Color.brandBlue)
                     .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .cornerRadius(999)
             }
             .padding(.horizontal)
             .padding(.vertical, 12)
@@ -241,7 +242,7 @@ struct BackOfCardStepView: View {
 
     private func saveAddressesAndProceed() {
         if !draft.recipientStreet.isEmpty {
-            addressBook.saveIfNew(name: draft.recipientName, address: draft.formattedRecipientAddress,
+            addressBook.saveIfNew(name: draft.recipientName, nickname: draft.recipientNickname, address: draft.formattedRecipientAddress,
                                   email: draft.recipientEmail, phone: draft.recipientPhone, role: .recipient)
         }
 
@@ -252,7 +253,7 @@ struct BackOfCardStepView: View {
         let draftEmail   = draft.senderEmail.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if !draftEmail.isEmpty && !profileEmail.isEmpty && draftEmail != profileEmail {
-            addressBook.saveIfNew(name: draft.senderName, address: draft.formattedSenderAddress,
+            addressBook.saveIfNew(name: draft.senderName, nickname: draft.senderNickname, address: draft.formattedSenderAddress,
                                   email: draftEmail, phone: draft.senderPhone, role: .sender)
             onNext()
             return

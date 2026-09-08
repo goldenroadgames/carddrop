@@ -1,11 +1,20 @@
 import SwiftUI
 
+// Publishes the canvas's current frameSize up to the top-level body, which
+// needs it in the .safeAreaInset closure (outside the GeometryReader that
+// computes it) to pass to draft.renderComposedImage(frameSize:).
+private struct FrameSizeKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
+}
+
 struct CanvasSetupStepView: View {
     @ObservedObject var draft: PostcardDraft
     var onNext: () -> Void
 
     @GestureState private var gestureScale: CGFloat = 1.0
     @GestureState private var gestureDrag: CGSize = .zero
+    @State private var lastFrameSize: CGSize = .zero
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,70 +30,85 @@ struct CanvasSetupStepView: View {
                 draft.imageOffset = .zero
             }
 
-            // Frame preview + button — all inside GeometryReader so frameSize is always live
+            // Frame preview — the GeometryReader only has to size the canvas
+            // itself now; the hint text and "Next" button live in the
+            // .safeAreaInset below, where SwiftUI reserves their real
+            // measured height automatically instead of a guessed constant.
             GeometryReader { geo in
-                let frameSize = postcardFrameSize(in: CGSize(width: geo.size.width, height: geo.size.height - 80))
+                let frameSize = postcardFrameSize(in: geo.size)
 
-                VStack(spacing: 0) {
-                    Spacer()
-
-                    ZStack {
-                        if let image = draft.image {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: frameSize.width, height: frameSize.height)
-                                .scaleEffect(draft.imageScale * gestureScale)
-                                .offset(
-                                    x: draft.imageOffset.width + gestureDrag.width,
-                                    y: draft.imageOffset.height + gestureDrag.height
-                                )
-                                .clipped()
-                        }
+                ZStack {
+                    if let image = draft.image {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: frameSize.width, height: frameSize.height)
+                            .scaleEffect(draft.imageScale * gestureScale)
+                            .offset(
+                                x: draft.imageOffset.width + gestureDrag.width,
+                                y: draft.imageOffset.height + gestureDrag.height
+                            )
+                            .clipped()
                     }
-                    .frame(width: frameSize.width, height: frameSize.height)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(4)
-                    .shadow(radius: 4)
-                    .gesture(
-                        SimultaneousGesture(
-                            MagnificationGesture()
-                                .updating($gestureScale) { value, state, _ in state = value }
-                                .onEnded { value in
-                                    draft.imageScale = max(1.0, draft.imageScale * value)
-                                },
-                            DragGesture()
-                                .updating($gestureDrag) { value, state, _ in state = value.translation }
-                                .onEnded { value in
-                                    draft.imageOffset.width += value.translation.width
-                                    draft.imageOffset.height += value.translation.height
-                                }
-                        )
+                }
+                .frame(width: frameSize.width, height: frameSize.height)
+                .background(Color.gray.opacity(0.2))
+                .cornerRadius(4)
+                .shadow(radius: 4)
+                .gesture(
+                    SimultaneousGesture(
+                        MagnificationGesture()
+                            .updating($gestureScale) { value, state, _ in state = value }
+                            .onEnded { value in
+                                draft.imageScale = max(1.0, draft.imageScale * value)
+                            },
+                        DragGesture()
+                            .updating($gestureDrag) { value, state, _ in state = value.translation }
+                            .onEnded { value in
+                                draft.imageOffset.width += value.translation.width
+                                draft.imageOffset.height += value.translation.height
+                            }
                     )
-
-                    Spacer()
-
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .background(Color.clear.preference(key: FrameSizeKey.self, value: frameSize))
+            }
+        }
+        .onPreferenceChange(FrameSizeKey.self) { lastFrameSize = $0 }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
                     Text("Pinch to zoom · Drag to reposition")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .padding(.bottom, 8)
-
-                    Button(action: {
-                        draft.renderComposedImage(frameSize: frameSize)
-                        onNext()
-                    }) {
-                        Text("Next: Choose Filter")
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.brandBlue)
-                            .foregroundColor(.white)
-                            .cornerRadius(12)
+                    Button {
+                        draft.imageScale = 1.0
+                        draft.imageOffset = .zero
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                            .foregroundColor(.secondary)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom)
+                    .buttonStyle(.plain)
                 }
-                .frame(width: geo.size.width, height: geo.size.height)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+
+                Button(action: {
+                    draft.renderComposedImage(frameSize: lastFrameSize)
+                    onNext()
+                }) {
+                    Text("Next: Choose Filter")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.brandBlue)
+                        .foregroundColor(.white)
+                        .cornerRadius(999)
+                }
+                .padding(.horizontal)
+                .padding(.bottom)
             }
+            .background(Color(uiColor: .systemBackground))
         }
     }
 

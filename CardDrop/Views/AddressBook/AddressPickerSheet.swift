@@ -29,13 +29,17 @@ struct AddressPickerSheet: View {
             List {
                 // CardDrop saved addresses — always at top
                 if savedAddresses.isEmpty && searchText.isEmpty {
-                    Section("CardDrop") {
+                    Section {
                         Text("No saved addresses yet.")
                             .foregroundColor(.secondary)
                             .font(.subheadline)
+                    } header: {
+                        Text("CardDrop")
+                            .font(.system(size: 13, weight: .regular))
+                            .textCase(.none)
                     }
                 } else if !savedAddresses.isEmpty {
-                    Section("CardDrop") {
+                    Section {
                         ForEach(savedAddresses) { entry in
                             Button {
                                 onSelect(entry.name, entry.address, entry.email, entry.phone)
@@ -58,6 +62,10 @@ struct AddressPickerSheet: View {
                                 addressBook.delete($0)
                             }
                         }
+                    } header: {
+                        Text("CardDrop")
+                            .font(.system(size: 13, weight: .regular))
+                            .textCase(.none)
                     }
                 }
 
@@ -72,7 +80,7 @@ struct AddressPickerSheet: View {
                             }
                         }
                     } else if !contactResults.isEmpty {
-                        Section("iPhone Contacts") {
+                        Section {
                             ForEach(contactResults, id: \.identifier) { contact in
                                 Button {
                                     onSelect(contactName(contact), contactAddress(contact),
@@ -100,6 +108,10 @@ struct AddressPickerSheet: View {
                                     }
                                 }
                             }
+                        } header: {
+                            Text("iPhone Contacts")
+                                .font(.system(size: 13, weight: .regular))
+                                .textCase(.none)
                         }
                     }
                 }
@@ -108,9 +120,7 @@ struct AddressPickerSheet: View {
             .navigationTitle(role == .sender ? "Select Sender" : "Select Recipient")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction) { dismiss() }
             }
             .onChange(of: searchText) { _, query in
                 searchContacts(query: query)

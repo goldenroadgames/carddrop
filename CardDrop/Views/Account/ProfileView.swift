@@ -48,26 +48,20 @@ struct ProfileView: View {
                 }
 
                 Section {
-                    Toggle(isOn: $appSettings.familyMode) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Family Mode")
-                            Text("Blocks strong language in messages")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
                     Text("Notifications")
                     Text("Privacy")
                 } header: {
                     HStack {
                         Text("Settings")
+                            .font(.system(size: 13, weight: .regular))
                         Spacer()
                         Button("Sign Out") {
                             showSignOutConfirmation = true
                         }
+                        .font(.system(size: 13, weight: .regular))
                         .foregroundColor(.red)
-                        .textCase(nil)
                     }
+                    .textCase(.none)
                 }
             }
             .navigationBarHidden(true)
@@ -116,7 +110,7 @@ struct ProfileView: View {
                         .padding(.vertical, 12)
                         .background(Color.brandBlue)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(999)
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 12)
@@ -150,7 +144,7 @@ struct ProfileView: View {
 
     @ViewBuilder
     private var nicknameSection: some View {
-        Section("Nickname") {
+        Section {
             TextField("e.g. Pookie", text: $senderNickname)
                 .onChange(of: senderNickname) { _, newValue in
                     nicknameSyncTask?.cancel()
@@ -160,12 +154,16 @@ struct ProfileView: View {
                         await UserService.updateSenderNickname(newValue)
                     }
                 }
+        } header: {
+            Text("Nickname")
+                .font(.system(size: 13, weight: .regular))
+                .textCase(.none)
         }
     }
 
     @ViewBuilder
     private var profileSection: some View {
-        Section("Profile") {
+        Section {
             TextField("First name", text: $firstName).autocapitalization(.words)
             TextField("Last name", text: $lastName).autocapitalization(.words)
             TextField("Street address", text: $street).autocapitalization(.words)
@@ -181,9 +179,13 @@ struct ProfileView: View {
             TextField("Country", text: $country).autocapitalization(.words)
             if profileIsDirty {
                 Button("Save Profile", action: saveProfile)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(.accentColor)
             }
+        } header: {
+            Text("Profile")
+                .font(.system(size: 13, weight: .regular))
+                .textCase(.none)
         }
     }
 
@@ -191,7 +193,7 @@ struct ProfileView: View {
 
     @ViewBuilder
     private var emailSection: some View {
-        Section("Email") {
+        Section {
             HStack {
                 Text(authManager.currentUserEmail ?? "—")
                     .foregroundColor(.primary)
@@ -207,10 +209,14 @@ struct ProfileView: View {
                             .padding(.vertical, 3)
                             .background(Color.brandBlue)
                             .foregroundColor(.white)
-                            .cornerRadius(6)
+                            .cornerRadius(999)
                     }
                 }
             }
+        } header: {
+            Text("Email")
+                .font(.system(size: 13, weight: .regular))
+                .textCase(.none)
         }
     }
 
@@ -218,7 +224,7 @@ struct ProfileView: View {
 
     @ViewBuilder
     private var storageSection: some View {
-        Section("Card Storage") {
+        Section {
             if authManager.hasPermanentStorage {
                 HStack {
                     Image(systemName: "archivebox.fill")
@@ -243,7 +249,7 @@ struct ProfileView: View {
                         Image(systemName: "archivebox.fill")
                             .foregroundColor(.purple)
                         Text("Unlock Permanent Storage — $9.99")
-                            .fontWeight(.semibold)
+                            .font(.system(size: 17, weight: .semibold))
                         Spacer()
                         Image(systemName: "chevron.right")
                             .font(.caption)
@@ -252,6 +258,10 @@ struct ProfileView: View {
                 }
                 .foregroundColor(.primary)
             }
+        } header: {
+            Text("Card Storage")
+                .font(.system(size: 13, weight: .regular))
+                .textCase(.none)
         }
     }
 }

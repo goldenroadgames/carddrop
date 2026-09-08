@@ -137,7 +137,9 @@ enum UserService {
             return true
         } catch {
             let message = error.localizedDescription.lowercased()
-            if message.contains("jwt") || message.contains("invalid token") || message.contains("not authenticated") {
+            if message.contains("jwt") || message.contains("invalid token") ||
+                
+                message.contains("not authenticated") {
                 print("[UserService] stale session detected — signing out")
                 return false
             }

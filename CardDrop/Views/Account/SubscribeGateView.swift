@@ -12,6 +12,7 @@ struct SubscribeGateView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var draftManager: DraftManager
     @EnvironmentObject private var addressBook: AddressBookManager
+    @EnvironmentObject private var appSettings: AppSettings
     @Environment(\.dismiss) private var dismiss
 
     @State private var showEmailSignup = false
@@ -33,9 +34,7 @@ struct SubscribeGateView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction, style: .bare) { dismiss() }
             }
             .sheet(isPresented: $showEmailSignup) {
                 EmailSignupView(onSuccess: onSuccess)
@@ -95,23 +94,23 @@ struct SubscribeGateView: View {
                     HStack {
                         Image(systemName: "apple.logo")
                         Text("Sign in with Apple")
-                            .fontWeight(.semibold)
+                            .font(.system(size: 17, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(Color.primary)
                     .foregroundColor(Color(uiColor: .systemBackground))
-                    .cornerRadius(12)
+                    .cornerRadius(999)
                 }
 
                 Button(action: { showEmailSignup = true }) {
                     Text("Sign in with Email")
-                        .fontWeight(.semibold)
+                        .font(.system(size: 17, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(Color.brandBlue)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(999)
                 }
             }
             .padding(.horizontal)
@@ -255,9 +254,7 @@ struct EmailSignupView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.disabled(isLoading)
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction, style: .bare, isDisabled: isLoading) { dismiss() }
             }
             .onChange(of: authManager.isEmailVerified) {
                 if authManager.isEmailVerified { onSuccess() }
@@ -326,14 +323,14 @@ struct EmailSignupView: View {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, 14)
             } else {
                 Text(label)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 17, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
         }
         .background(Color.brandBlue)
         .foregroundColor(.white)
-        .cornerRadius(12)
+        .cornerRadius(999)
         .disabled(isLoading)
     }
 }
@@ -401,13 +398,13 @@ struct AppleSignInProfileView: View {
 
                         Button(action: save) {
                             Text("Continue")
-                                .fontWeight(.semibold)
+                                .font(.system(size: 17, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
                         }
                         .background(Color.brandBlue)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(999)
                         .disabled(firstName.isEmpty)
                         .padding(.top, 8)
                     }
@@ -417,9 +414,7 @@ struct AppleSignInProfileView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Skip") { onSuccess(); dismiss() }
-                }
+                toolbarPillItem("Skip", placement: .cancellationAction) { onSuccess(); dismiss() }
             }
             .onAppear {
                 firstName = authManager.firstName

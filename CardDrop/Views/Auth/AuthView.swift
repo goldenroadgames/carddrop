@@ -24,27 +24,28 @@ struct AuthView: View {
 
             Spacer()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 6) {
                 Button(action: { authManager.signInWithApple() }) {
                     HStack {
                         Image(systemName: "apple.logo")
                         Text("Sign in with Apple")
-                            .fontWeight(.semibold)
+                            .font(.system(size: 17, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(Color.primary)
                     .foregroundColor(Color(uiColor: .systemBackground))
-                    .cornerRadius(12)
+                    .cornerRadius(999)
                 }
 
                 Button(action: { showEmailSignIn = true }) {
                     Text("Sign in with Email")
+                        .font(.system(size: 17, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding()
                         .background(Color.brandBlue)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(999)
                 }
 
                 Button(action: handleAnonymousSignIn) {
@@ -52,11 +53,11 @@ struct AuthView: View {
                         ProgressView().scaleEffect(0.7)
                     } else {
                         Text("Continue without signing in")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
+                            .font(.footnote.weight(.medium))
+                            .foregroundColor(.black)
                     }
                 }
-                .padding(.top, 4)
+                .padding(.top, 14)
                 .disabled(isLoading)
             }
             .padding(.horizontal)

@@ -61,13 +61,14 @@ struct SwitchToAccountView: View {
                                 .padding()
                         } else {
                             Text("Sign In")
+                                .font(.system(size: 17, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding()
                         }
                     }
                     .background(Color.brandBlue)
                     .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .cornerRadius(999)
                     .disabled(isLoading || password.isEmpty)
                 }
                 .padding(.horizontal)
@@ -77,10 +78,7 @@ struct SwitchToAccountView: View {
             .navigationTitle("Sign In")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isLoading)
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction, isDisabled: isLoading) { dismiss() }
             }
         }
     }

@@ -21,7 +21,8 @@ struct FilterThumbnailView: View {
 
             Text(filter.rawValue)
                 .font(.caption2)
-                .foregroundColor(isSelected ? .accentColor : .secondary)
+                .foregroundColor(isSelected ? .brandBlue : .black)
+                .padding(.bottom, 4)
         }
         .onTapGesture(perform: onTap)
     }

@@ -5,7 +5,6 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>Caveat-SemiBold.ttf</string>
-		<string></string>
 	</array>
 	<key>NSContactsUsageDescription</key>
 	<string>CardDrop uses your contacts to help you address cards to recipients.</string>

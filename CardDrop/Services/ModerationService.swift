@@ -8,9 +8,6 @@ enum ModerationResult {
 
 struct ModerationService {
 
-    /// Human-readable category labels that are softened in Casual Mode (warn, not hard-block).
-    static let harassmentLabels: Set<String> = ["harassment", "threatening harassment"]
-
     /// Check one or more text strings.
     static func check(texts: [String]) async -> ModerationResult {
         let nonEmpty = texts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

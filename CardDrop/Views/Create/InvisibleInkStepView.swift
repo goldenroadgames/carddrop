@@ -119,13 +119,14 @@ struct InvisibleInkStepView: View {
                         ProgressView().tint(.white)
                     } else {
                         Text("Next: Addresses")
+                            .font(.system(size: 17, weight: .semibold))
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
                 .background(Color.brandBlue)
                 .foregroundColor(.white)
-                .cornerRadius(12)
+                .cornerRadius(999)
             }
             .disabled(isModerating)
             .padding(.horizontal)

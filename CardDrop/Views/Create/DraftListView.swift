@@ -36,9 +36,7 @@ struct DraftListView: View {
             .navigationTitle("Drafts")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction) { dismiss() }
             }
         }
     }

@@ -27,6 +27,7 @@ struct BorderStepView: View {
         GeometryReader { geo in
         let frameSize = cardFrameSize(availableSize: geo.size)
 
+        ScrollView {
         VStack(spacing: 0) {
             // Live card preview — fixed size, same across steps
             PostcardFrontCanvas(
@@ -34,6 +35,7 @@ struct BorderStepView: View {
                 overlays: draft.textOverlays,
                 qrOverlays: draft.qrOverlays,
                 burstOverlays: draft.burstOverlays,
+                greetingsOverlays: draft.greetingsOverlays,
                 size: frameSize,
                 border: draft.border,
                 orientation: draft.orientation,
@@ -98,7 +100,7 @@ struct BorderStepView: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
                         .background(Color(.secondarySystemBackground))
-                        .cornerRadius(8)
+                        .cornerRadius(999)
 
                         ColorPicker("", selection: $draft.borderTextColor, supportsOpacity: false)
                             .labelsHidden()
@@ -124,7 +126,7 @@ struct BorderStepView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
                             .background(Color(.secondarySystemBackground))
-                            .cornerRadius(8)
+                            .cornerRadius(999)
 
                             ColorPicker("", selection: $draft.borderTextColor, supportsOpacity: false)
                                 .labelsHidden()
@@ -136,23 +138,25 @@ struct BorderStepView: View {
             }
             .animation(.easeInOut(duration: 0.18), value: draft.border)
             .padding(.vertical, 12)
+        }
+        .frame(width: geo.size.width)
+        } // end ScrollView
 
-            Spacer()
-
+        } // end GeometryReader
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             Button(action: onNext) {
                 Text("Next: Write Card")
+                    .font(.system(size: 17, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(Color.brandBlue)
                     .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .cornerRadius(999)
             }
             .padding(.horizontal)
             .padding(.vertical, 12)
+            .background(Color(uiColor: .systemBackground))
         }
-        .frame(width: geo.size.width, height: geo.size.height)
-
-        } // end GeometryReader
         .alert("Use Decorative as Starting Point?", isPresented: $showTransferAlert) {
             Button("Transfer") {
                 // Keep the decorative text/font/color — already in draft
@@ -226,10 +230,10 @@ private struct BorderOptionButton: View {
                 .background(selected ? Color.brandBlue.opacity(0.12) : Color(.secondarySystemBackground))
                 .foregroundColor(selected ? Color.brandBlue : .primary)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: 999)
                         .stroke(selected ? Color.brandBlue : Color.clear, lineWidth: 2)
                 )
-                .cornerRadius(10)
+                .cornerRadius(999)
         }
     }
 }

@@ -56,6 +56,7 @@ class DraftManager: ObservableObject {
         deleteImageFromDisk(name: "\(id)_original")
         deleteImageFromDisk(name: "\(id)_front")
         deleteImageFromDisk(name: "\(id)_back")
+        deleteImageFromDisk(name: "\(id)_back6x9")
         persistIndex()
     }
 
@@ -95,7 +96,7 @@ class DraftManager: ObservableObject {
 
         // Copy images and merge index entries (anonymous drafts go to front)
         for snapshot in anonSnapshots {
-            for suffix in ["_original", "_front", "_back"] {
+            for suffix in ["_original", "_front", "_back", "_back6x9"] {
                 let src = anonDir.appendingPathComponent("\(snapshot.id)\(suffix).jpg")
                 let dst = targetDir.appendingPathComponent("\(snapshot.id)\(suffix).jpg")
                 try? FileManager.default.copyItem(at: src, to: dst)
@@ -163,6 +164,10 @@ class DraftManager: ObservableObject {
         loadImageDataFromDisk(name: "\(cardID.uuidString)_back")
     }
 
+    func loadBack6x9Data(for cardID: UUID) -> Data? {
+        loadImageDataFromDisk(name: "\(cardID.uuidString)_back6x9")
+    }
+
     @MainActor
     func restoreFromServer(cardID: UUID, recipientName: String, sentAt: Date, isLandscape: Bool) {
         guard !drafts.contains(where: { $0.cardID == cardID }) else { return }
@@ -210,6 +215,14 @@ class DraftManager: ObservableObject {
 
     func loadBack(for cardID: UUID) -> UIImage? {
         loadImageFromDisk(name: "\(cardID.uuidString)_back")
+    }
+
+    func saveBack6x9(_ image: UIImage, cardID: UUID) {
+        saveImageToDisk(image, name: "\(cardID.uuidString)_back6x9", quality: 0.88)
+    }
+
+    func loadBack6x9(for cardID: UUID) -> UIImage? {
+        loadImageFromDisk(name: "\(cardID.uuidString)_back6x9")
     }
 
     private func deleteImageFromDisk(name: String) {

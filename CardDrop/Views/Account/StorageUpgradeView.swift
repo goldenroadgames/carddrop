@@ -57,7 +57,7 @@ struct StorageUpgradeView: View {
                                             .padding(.vertical, 14)
                                     } else {
                                         Text("Unlock Permanent Storage")
-                                            .fontWeight(.semibold)
+                                            .font(.system(size: 17, weight: .semibold))
                                             .frame(maxWidth: .infinity)
                                             .padding(.vertical, 14)
                                     }
@@ -65,7 +65,7 @@ struct StorageUpgradeView: View {
                             }
                             .background(Color.purple)
                             .foregroundColor(.white)
-                            .cornerRadius(12)
+                            .cornerRadius(999)
                             .disabled(store.isLoading)
                             .padding(.top, 4)
 
@@ -99,9 +99,7 @@ struct StorageUpgradeView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction) { dismiss() }
             }
             .onChange(of: store.isPurchased) {
                 if store.isPurchased {

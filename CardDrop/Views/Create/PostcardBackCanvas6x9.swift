@@ -1,20 +1,38 @@
 import SwiftUI
 
-struct PostcardBackCanvas: View {
+// MARK: - Postcard Back Canvas (6x9 alternate layout)
+//
+// Alternate LOB-print-only cardback for the 6x9 postcard (9"x6" landscape
+// trim) — built alongside PostcardBackCanvas.swift (the existing 4x6/6x4
+// design) rather than replacing it. The two sizes have genuinely different
+// no-ink zone geometry (per LOB's own templates) AND a different branding
+// placement: here the band sits top-right, stacked directly above the
+// no-ink zone (matching/flush its width and right edge), instead of
+// bottom-left like the 4x6 back. That's a structurally different message
+// polygon too (one obstacle column on the right vs. two separate notches),
+// so this is kept as a fully independent view/file rather than a branch
+// inside the existing one — nothing here can affect the 4x6 back.
+//
+// Not yet wired into CardRenderer/the send flow/draft model — same
+// "prep, not connected yet" status as PostcardBackCanvas's own `forLOB` flag,
+// since the LOB submission step (and any postcard-size choice) doesn't
+// exist yet.
+struct PostcardBackCanvas6x9: View {
     @ObservedObject var draft: PostcardDraft
     let size: CGSize
     let qr1Image: UIImage?
     let qr2Image: UIImage?
-    // LOB physical-mail sends need this zone blank for the mailing address —
-    // set true to skip the digital-only greeting/phrase/tint. No caller
-    // passes true yet (the LOB submission step doesn't exist); this is prep
-    // for that step, which will render its own back image with this set.
     var forLOB: Bool = false
 
-    private let inkFreeWidthFraction:  CGFloat = 3.2835 / 6.0
-    private let inkFreeHeightFraction: CGFloat = 2.375  / 4.0
-    private let inkFreeRightInset:     CGFloat = 0.15   / 6.0
-    private let inkFreeBottomInset:    CGFloat = 0.125  / 4.0
+    // LOB's 6x9 template (9"x6" landscape trim): 4" x 2.375" ink-free zone,
+    // inset 0.15" from the right edge and 0.125" from the bottom edge.
+    // Expressed as fractions of card width/height (not raw inches) so this
+    // stays correct if `size` is ever rendered at something other than the
+    // 450 DPI / 4050x2700 this was designed against.
+    private let inkFreeWidthFraction:  CGFloat = 4.0    / 9.0
+    private let inkFreeHeightFraction: CGFloat = 2.375  / 6.0
+    private let inkFreeRightInset:     CGFloat = 0.15   / 9.0
+    private let inkFreeBottomInset:    CGFloat = 0.125  / 6.0
 
     private let borderWidth: CGFloat = 54
 
@@ -23,122 +41,100 @@ struct PostcardBackCanvas: View {
         let h  = size.height
         let bw = borderWidth
 
-        // Branding band — overlaps border on left and bottom (same blue,
-        // so the overlap is seamless). Height set to a 4x6 h:w ratio
-        // against the (unchanged) width, minus 56, then shifted down so
-        // its bottom edge sits flush with the card's bottom edge — fully
-        // overlapping the bottom border's full width instead of just 1px.
-        //
-        // BrandingBand's internal content (fonts, offsets, QR size, etc.)
-        // is all tuned against this design size; bandScale shrinks the
-        // whole rendered band uniformly afterward, so shrinking the box
-        // scales everything inside it by the same proportion without
-        // touching any of those internal constants individually.
+        // No-ink zone (LOB address block) — anchored from the card's right
+        // and bottom edges, same corner-anchoring approach as the 4x6 back.
+        let noInkWidth  = w * inkFreeWidthFraction
+        let noInkHeight = h * inkFreeHeightFraction
+        let noInkLeft   = w * (1 - (inkFreeWidthFraction + inkFreeRightInset))
+        let noInkTop    = h * (1 - (inkFreeHeightFraction + inkFreeBottomInset))
+
+        // Branding band — same absolute size as the 4x6 back's band (not
+        // rescaled to the no-ink zone's width). Positioned so its
+        // bottom-right corner sits 18px above and 18px to the left of the
+        // no-ink zone's top-right corner.
         let bandDesignW: CGFloat = 1100
         let bandDesignH: CGFloat = bandDesignW * 4 / 6 - 56 - 15
         let bandScale: CGFloat = 0.9
         let bandW: CGFloat = bandDesignW * bandScale
         let bandH: CGFloat = bandDesignH * bandScale
-        let bandX: CGFloat = 53 + 10 + 10
-        let bandY: CGFloat = h - bandH - 66
+        let bandX: CGFloat = 2820
+        let bandY: CGFloat = 940
 
-        // No-ink zone top-left corner (LOB ink-free area) — used to anchor
-        // the hairline guides below.
-        let noInkLeft = w * (1 - (inkFreeWidthFraction + inkFreeRightInset))
-        let noInkTop  = h * (1 - (inkFreeHeightFraction + inkFreeBottomInset))
+        // Message-area polygon — three zones, same shape as the 4x6 back's:
+        // the band is narrower than the no-ink zone here, so the obstacle
+        // column narrows twice (once to clear the band, again to clear the
+        // wider no-ink zone below it) rather than the single step a
+        // flush-matching band+zone width would allow.
+        //
+        // All values here are hardcoded (not derived from noInkLeft/noInkTop/
+        // messageAreaMaxY-as-formula/etc.) so fine-tuning the polygon can't
+        // silently shift if the border width or LOB ink-free-zone fractions
+        // above ever change — those still drive the real ink-free content
+        // zone (`noInkLeft`/`noInkTop` below), which is intentionally kept
+        // separate from this polygon's own obstacle edges.
+        let messageAreaLeftX: CGFloat = 160
+        let messageAreaTopY:  CGFloat = 143
+        let messageAreaMaxX:  CGFloat = 3910
+        let messageAreaMaxY:  CGFloat = 2646
+        let messagePolygonNoInkTop:  CGFloat = 1625
+        let messagePolygonNoInkLeft: CGFloat = 2200
+        let messageZones: [MessageZone6x9] = [
+            MessageZone6x9(yStart: messageAreaTopY, yEnd: bandY + 3,     right: messageAreaMaxX),
+            MessageZone6x9(yStart: bandY + 3,           yEnd: messagePolygonNoInkTop + 3,  right: bandX),
+            MessageZone6x9(yStart: messagePolygonNoInkTop + 3, yEnd: messageAreaMaxY, right: messagePolygonNoInkLeft)
+        ]
 
         ZStack(alignment: .topLeading) {
             Color.white
 
-            // Branding band — rendered at its design size, then scaled down
-            // as a whole (see comment above bandDesignW).
-            BrandingBand(qr2Image: qr2Image, width: bandDesignW, height: bandDesignH, borderWidth: bw)
+            BrandingBand6x9(qr2Image: qr2Image, width: bandDesignW, height: bandDesignH, borderWidth: bw)
                 .frame(width: bandDesignW, height: bandDesignH)
                 .scaleEffect(bandScale)
                 .frame(width: bandW, height: bandH)
                 .offset(x: bandX, y: bandY)
 
-            // Message text — single stepped polygon covering the same area
-            // the old three boxes covered (notched around QR1 top-right and
-            // the branding band bottom-right).
             let message = draft.message.trimmingCharacters(in: .whitespacesAndNewlines)
             if !message.isEmpty {
-                MessagePolygonLabel(
+                MessagePolygonLabel6x9(
                     text: message,
                     boundingWidth: messageAreaMaxX,
-                    boundingHeight: messageAreaMaxY
+                    boundingHeight: messageAreaMaxY,
+                    leftX: messageAreaLeftX,
+                    topY: messageAreaTopY,
+                    maxY: messageAreaMaxY,
+                    zones: messageZones
                 )
             }
 
-            // Digital-only ink-free-zone content: greeting (salutation top,
-            // closing bottom) + standalone phrase, stacked between them.
-            // Physical LOB sends need this zone blank for the mailing
-            // address, so skip it entirely when forLOB is set.
+            // Digital-only ink-free-zone content — skipped for a physical
+            // LOB send, which needs this area blank for the mailing address.
             if !forLOB {
-                InkZoneContent(
+                InkZoneContent6x9(
                     salutation: draft.greetingSalutation,
                     phrase: draft.phraseText,
                     closing: draft.greetingClosing,
                     zoneLeft: noInkLeft,
                     zoneTop: noInkTop,
-                    zoneWidth: w * inkFreeWidthFraction,
-                    zoneHeight: h * inkFreeHeightFraction,
+                    zoneWidth: noInkWidth,
+                    zoneHeight: noInkHeight,
                     cardWidth: w,
                     cardHeight: h
                 )
             }
-
-            AddressHairlineGuides(
-                noInkLeft: noInkLeft,
-                noInkTop: noInkTop,
-                bandTop: bandY,
-                borderInsideRight: w - bw
-            )
-            .opacity(0)
         }
         .frame(width: w, height: h)
     }
 }
 
-// MARK: - Address hairline guides
-//
-// Marks the boundary of LOB's addressing area: a vertical line from the
-// no-ink zone's top edge down to the branding band's top edge, and a
-// horizontal line from the no-ink zone's top-left corner over to the
-// inside edge of the border.
-private struct AddressHairlineGuides: View {
-    let noInkLeft: CGFloat
-    let noInkTop: CGFloat
-    let bandTop: CGFloat
-    let borderInsideRight: CGFloat
+// MARK: - Ink-free zone content (duplicated from PostcardBackCanvas's
+// private InkZoneContent — same absolute tuning constants read fine against
+// this zone since its HEIGHT is identical in inches to the 4x6 back's zone;
+// only the width is more generous here)
 
-    private let lineWidth: CGFloat = 3
-
-    var body: some View {
-        Rectangle()
-            .fill(Color.black)
-            .frame(width: lineWidth, height: bandTop - noInkTop)
-            .offset(x: noInkLeft, y: noInkTop)
-
-        Rectangle()
-            .fill(Color.black)
-            .frame(width: borderInsideRight - noInkLeft, height: lineWidth)
-            .offset(x: noInkLeft, y: noInkTop)
-    }
-}
-
-// MARK: - Ink-free zone content
-
-private struct InkZoneContent: View {
+private struct InkZoneContent6x9: View {
     let salutation: String
     let phrase: String
     let closing: String
-    // Zone origin/size, expressed in the SAME coordinate space as
-    // cardWidth/cardHeight below (i.e. full-card coordinates) — not a
-    // locally-offset sub-space. Every element below computes its position
-    // as zoneLeft/zoneTop + a local margin, all within one flat ZStack, so
-    // there's no separate nested coordinate space that could drift out of
-    // sync with the rest of the card.
     let zoneLeft: CGFloat
     let zoneTop: CGFloat
     let zoneWidth: CGFloat
@@ -146,12 +142,11 @@ private struct InkZoneContent: View {
     let cardWidth: CGFloat
     let cardHeight: CGFloat
 
-    // Bic Cristal ballpoint blue — matches MessagePolygonLabel's inkColor.
     private let inkColor = Color(red: 0.11, green: 0.24, blue: 0.45)
     private let inkUIColor = UIColor(red: 0.11, green: 0.24, blue: 0.45, alpha: 1)
 
-    private let fontSize: CGFloat = 120
-    private let inkLineHeight: CGFloat = 110
+    private let fontSize: CGFloat = 140
+    private let inkLineHeight: CGFloat = 139
     private let phraseSideMargin: CGFloat = 250
 
     private var sharedFont: UIFont {
@@ -170,13 +165,13 @@ private struct InkZoneContent: View {
                 let salY = zoneTop + 100
                 let salFrameW = cardWidth - salX
                 let salFrameH: CGFloat = 200
-                InkTextCanvasLabel(text: salutation, font: sharedFont, lineHeight: inkLineHeight, color: inkUIColor, alignment: .left)
+                InkTextCanvasLabel6x9(text: salutation, font: sharedFont, lineHeight: inkLineHeight, color: inkUIColor, alignment: .left)
                     .frame(width: salFrameW, height: salFrameH)
                     .rotationEffect(.degrees(-3), anchor: .leading)
                     .position(x: salX + salFrameW / 2, y: salY + salFrameH / 2)
             }
             if !phrase.isEmpty {
-                InkTextCanvasLabel(text: phrase, font: sharedFont, lineHeight: inkLineHeight, color: inkUIColor, alignment: .center)
+                InkTextCanvasLabel6x9(text: phrase, font: sharedFont, lineHeight: inkLineHeight, color: inkUIColor, alignment: .center)
                     .frame(width: max(zoneWidth - 2 * phraseSideMargin, 0), height: 400)
                     .rotationEffect(.degrees(-2))
                     .position(x: zoneLeft + zoneWidth / 2, y: zoneTop + zoneHeight / 2)
@@ -186,7 +181,7 @@ private struct InkZoneContent: View {
                 let closeFrameW = cardWidth - closeX
                 let closeFrameH: CGFloat = 200
                 let closeBottomY = (zoneTop + zoneHeight) - 100
-                InkTextCanvasLabel(text: closing, font: sharedFont, lineHeight: inkLineHeight, color: inkUIColor, alignment: .left)
+                InkTextCanvasLabel6x9(text: closing, font: sharedFont, lineHeight: inkLineHeight, color: inkUIColor, alignment: .left)
                     .frame(width: closeFrameW, height: closeFrameH)
                     .rotationEffect(.degrees(-3), anchor: .leading)
                     .position(x: closeX + closeFrameW / 2, y: closeBottomY - closeFrameH / 2)
@@ -197,12 +192,7 @@ private struct InkZoneContent: View {
     }
 }
 
-// MARK: - Ink zone text label (Core Text — gives absolute line-height
-// control and one shared rendering path for all three ink-zone texts, so
-// there's no discrepancy between a Text-rendered element and a
-// Canvas-rendered one)
-
-private struct InkTextCanvasLabel: View {
+private struct InkTextCanvasLabel6x9: View {
     let text: String
     let font: UIFont
     let lineHeight: CGFloat
@@ -246,78 +236,58 @@ private struct InkTextCanvasLabel: View {
     }
 }
 
-// MARK: - Message area polygon
+// MARK: - Message area polygon (6x9)
 //
-// Stepped rectilinear region, notched around the one remaining FIXED,
-// independently-positioned obstacle that doesn't move when this polygon
-// is retuned (QR1 was removed from the cardback, so Zone A/B merged into
-// a single wide-open zone since there's no longer anything to clear up top):
-//   No-ink zone (pink box): x ~1155–2646, y ~675–1746
-// Zone boundaries are tied to that obstacle's edges, not arbitrary values:
-//   Zone A: x 98–2570, y 58–675    (wide open, no top obstacle anymore)
-//   Zone C: x 98–1170, y 675–1142  (narrows to clear the branding band)
+// Two-zone stepped rectilinear region: Zone A (above the branding band) is
+// wide open; Zone B (from the band's top edge down to the bottom margin)
+// narrows once, to the band/no-ink-zone's shared left edge, clearing both
+// in a single step since they're flush-stacked with identical width.
+// Zones are computed fresh from live geometry in PostcardBackCanvas6x9.body
+// (not hardcoded constants like the 4x6 back's), since the band's position
+// is itself derived from the no-ink zone rather than a fixed value.
 
-private let messageAreaMaxX: CGFloat = 2570
-private let messageAreaMaxY: CGFloat = 1142
-private let messageAreaTopY: CGFloat = 58
-private let messageAreaLeftX: CGFloat = 98
-
-private struct MessageZone {
+private struct MessageZone6x9 {
     let yStart: CGFloat
     let yEnd: CGFloat
     let right: CGFloat
 }
 
-// Left edge is a constant messageAreaLeftX across all zones, so the polygon
-// only steps on the right edge (the no-ink-zone notch) — see
-// PostcardBackCanvas.swift header comment for the zone breakdown.
-private let messageZones: [MessageZone] = [
-    MessageZone(yStart: 58,  yEnd: 675,  right: 2570),
-    MessageZone(yStart: 675, yEnd: 1142, right: 1170)
-]
-
-// Builds the message-area polygon starting from `topY` instead of the full
-// area's top (messageAreaTopY) — used to vertically center short messages
-// by trimming off unused top space while keeping each remaining zone's own
-// width (rather than just shifting the drawn text down, which would apply
-// the wrong zone's width and risk overlapping the QR/band notches).
-private func messageAreaPath(topY: CGFloat = messageAreaTopY) -> CGPath {
-    // Core Text's own coordinate space is bottom-up (y increases upward),
-    // so vertices are authored here as (x, maxY - topDownY) — flipping the
-    // path itself, not just the CGContext at draw time — so Core Text's
-    // internal notion of "top" lines up with zone A instead of zone C.
-    func pt(_ x: CGFloat, _ topDownY: CGFloat) -> CGPoint {
-        CGPoint(x: x, y: messageAreaMaxY - topDownY)
-    }
-
-    let p = CGMutablePath()
-    p.move(to: pt(messageAreaLeftX, topY))
-    var lastZoneEnd = topY
-    for zone in messageZones where zone.yEnd > topY {
-        let top = max(zone.yStart, topY)
-        p.addLine(to: pt(zone.right, top))
-        p.addLine(to: pt(zone.right, zone.yEnd))
-        lastZoneEnd = zone.yEnd
-    }
-    p.addLine(to: pt(messageAreaLeftX, lastZoneEnd))
-    p.closeSubpath()
-    return p
-}
-
-// MARK: - Message label
-
-private struct MessagePolygonLabel: View {
+private struct MessagePolygonLabel6x9: View {
     let text: String
     let boundingWidth: CGFloat
     let boundingHeight: CGFloat
+    // Left edge is constant across all zones, so the polygon only steps on
+    // the right edge.
+    let leftX: CGFloat
+    let topY: CGFloat
+    // Core Text's own coordinate space is bottom-up (y increases upward), so
+    // vertices are authored as (x, maxY - topDownY) — flipping the path
+    // itself, not just the CGContext at draw time.
+    let maxY: CGFloat
+    let zones: [MessageZone6x9]
 
-    private let fontSize: CGFloat = 98
-    private let lineHeight: CGFloat = 97 // 0.91x — tuned for 3/3/6 line split across zones A/B/C
-
+    private let fontSize: CGFloat = 176
+    private let lineHeight: CGFloat = 179
     private let startIndent: CGFloat = 50
-
-    // Bic Cristal ballpoint blue — muted navy, not a bright/saturated blue.
     private let inkColor = UIColor(red: 0.11, green: 0.24, blue: 0.45, alpha: 1)
+
+    private func path(from startTopY: CGFloat) -> CGPath {
+        func pt(_ x: CGFloat, _ topDownY: CGFloat) -> CGPoint {
+            CGPoint(x: x, y: maxY - topDownY)
+        }
+        let p = CGMutablePath()
+        p.move(to: pt(leftX, startTopY))
+        var lastZoneEnd = startTopY
+        for zone in zones where zone.yEnd > startTopY {
+            let top = max(zone.yStart, startTopY)
+            p.addLine(to: pt(zone.right, top))
+            p.addLine(to: pt(zone.right, zone.yEnd))
+            lastZoneEnd = zone.yEnd
+        }
+        p.addLine(to: pt(leftX, lastZoneEnd))
+        p.closeSubpath()
+        return p
+    }
 
     var body: some View {
         Canvas { context, _ in
@@ -327,9 +297,8 @@ private struct MessagePolygonLabel: View {
             // wide Zone A), indented, instead of the very top, so typing
             // always begins in the same spot rather than jumping around
             // based on message length. Only fall back to the full
-            // top-anchored area (no indent, like line 1 always has) — for
-            // the rare very-long message that wouldn't otherwise fit — so
-            // nothing ever gets clipped.
+            // top-anchored area (no indent) for the rare very-long message
+            // that wouldn't otherwise fit, so nothing ever gets clipped.
             let startStyle = NSMutableParagraphStyle()
             startStyle.minimumLineHeight = lineHeight
             startStyle.maximumLineHeight = lineHeight
@@ -343,8 +312,8 @@ private struct MessagePolygonLabel: View {
                 ]
             )
             let startFramesetter = CTFramesetterCreateWithAttributedString(startAttrStr)
-            let startY = messageAreaTopY + lineHeight
-            let startPath = messageAreaPath(topY: startY)
+            let startY = topY + lineHeight
+            let startPath = path(from: startY)
             let startFrame = CTFramesetterCreateFrame(startFramesetter, CFRangeMake(0, 0), startPath, nil)
             let visible = CTFrameGetVisibleStringRange(startFrame)
             let ctFrame: CTFrame
@@ -363,7 +332,7 @@ private struct MessagePolygonLabel: View {
                     ]
                 )
                 let fallbackFramesetter = CTFramesetterCreateWithAttributedString(fallbackAttrStr)
-                ctFrame = CTFramesetterCreateFrame(fallbackFramesetter, CFRangeMake(0, 0), messageAreaPath(), nil)
+                ctFrame = CTFramesetterCreateFrame(fallbackFramesetter, CFRangeMake(0, 0), path(from: topY), nil)
             }
 
             context.withCGContext { cgContext in
@@ -379,12 +348,10 @@ private struct MessagePolygonLabel: View {
     }
 }
 
-// MARK: - Stamp edge shape
+// MARK: - Stamp edge shape (duplicated from PostcardBackCanvas's private
+// StampEdgeShape — mimics a postage stamp's perforated border)
 
-// A rectangle with semicircular notches cut inward along all four edges,
-// evenly spaced to fit the rect's actual size — mimics a postage stamp's
-// perforated border.
-private struct StampEdgeShape: Shape {
+private struct StampEdgeShape6x9: Shape {
     var scallopRadius: CGFloat
 
     func path(in rect: CGRect) -> Path {
@@ -398,28 +365,21 @@ private struct StampEdgeShape: Shape {
 
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
 
-        // Top edge, left to right — notch dips down into the rect.
         for i in 0..<horizontalScallops {
             let x = rect.minX + CGFloat(i) * horizontalStep + horizontalStep / 2
             path.addArc(center: CGPoint(x: x, y: rect.minY), radius: r,
                         startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
         }
-
-        // Right edge, top to bottom — notch dips left into the rect.
         for i in 0..<verticalScallops {
             let y = rect.minY + CGFloat(i) * verticalStep + verticalStep / 2
             path.addArc(center: CGPoint(x: rect.maxX, y: y), radius: r,
                         startAngle: .degrees(270), endAngle: .degrees(90), clockwise: false)
         }
-
-        // Bottom edge, right to left — notch dips up into the rect.
         for i in 0..<horizontalScallops {
             let x = rect.maxX - (CGFloat(i) * horizontalStep + horizontalStep / 2)
             path.addArc(center: CGPoint(x: x, y: rect.maxY), radius: r,
                         startAngle: .degrees(0), endAngle: .degrees(180), clockwise: false)
         }
-
-        // Left edge, bottom to top — notch dips right into the rect.
         for i in 0..<verticalScallops {
             let y = rect.maxY - (CGFloat(i) * verticalStep + verticalStep / 2)
             path.addArc(center: CGPoint(x: rect.minX, y: y), radius: r,
@@ -431,28 +391,24 @@ private struct StampEdgeShape: Shape {
     }
 }
 
-// MARK: - Branding Band
+// MARK: - Branding Band (duplicated from PostcardBackCanvas's private
+// BrandingBand — identical internal design; only the width/height passed in
+// at the call site differ, which scales the whole thing uniformly)
 
-private struct BrandingBand: View {
+private struct BrandingBand6x9: View {
     let qr2Image: UIImage?
     let width: CGFloat
     let height: CGFloat
     let borderWidth: CGFloat
 
     var body: some View {
-        // Same qrTotal footprint (226) as always. Padding needs to be at
-        // least the scallop radius (10, restored below) so the notches
-        // don't cut into the QR image itself.
         let qrImageSize: CGFloat = 206
         let qrPad:       CGFloat = 10
         let qrTotal:     CGFloat = qrImageSize + qrPad * 2   // 226
 
-        // QR pinned to the band's top-right corner, offset from both edges
-        // by the same width as the blue border around the whole card.
         let localX: CGFloat = width - borderWidth - qrTotal
         let localY: CGFloat = borderWidth
 
-        // CardDrop / "On. The. FRIDGE." font sizes, with a fixed gap between them.
         let wordmarkSize: CGFloat = 132
         let onTheSize:    CGFloat = 72
         let lineGap:      CGFloat = 36
@@ -460,12 +416,9 @@ private struct BrandingBand: View {
         let wordmarkLineHeight = UIFont.systemFont(ofSize: wordmarkSize, weight: .bold).lineHeight
         let onTheLineHeight    = UIFont.systemFont(ofSize: onTheSize, weight: .bold).lineHeight
 
-        // Vertically centered in the branding box itself.
         let textBlockHeight: CGFloat = wordmarkLineHeight + lineGap + onTheLineHeight
         let textBlockY: CGFloat = height / 2 - textBlockHeight / 2
 
-        // Horizontally centered between the band's left edge and the QR
-        // background's left edge.
         let textBlockX:     CGFloat = 0
         let textBlockWidth: CGFloat = localX
 
@@ -478,7 +431,7 @@ private struct BrandingBand: View {
                     .resizable()
                     .frame(width: qrImageSize, height: qrImageSize)
                     .padding(qrPad)
-                    .background(StampEdgeShape(scallopRadius: 10).fill(Color.white))
+                    .background(StampEdgeShape6x9(scallopRadius: 10).fill(Color.white))
                     .offset(x: localX, y: localY)
             }
 
@@ -491,13 +444,6 @@ private struct BrandingBand: View {
                 .background(Color.clear)
                 .padding(.top, -10)
 
-                // Individual words in an HStack with an explicit gap, rather
-                // than a single string's space characters — a plain space
-                // renders at an uneven visual width depending on the
-                // adjacent letterforms (e.g. "The." into "FRIDGE." reads
-                // tighter than "On." into "The." even with identical space
-                // characters), so this is the only way to guarantee the
-                // gaps actually look equal.
                 HStack(spacing: 14) {
                     Text("On.")
                     Text("The.")
@@ -511,21 +457,10 @@ private struct BrandingBand: View {
             .frame(width: textBlockWidth, height: textBlockHeight, alignment: .top)
             .offset(x: textBlockX + 40, y: textBlockY - 60 + 20)
 
-            // Lower-right corner of the branding box, inset 56px from the
-            // right edge, same vertical position as before — measured to
-            // the text's BOTTOM edge (not its top), since the band's bottom
-            // now sits flush with the card's bottom edge where the blue
-            // border (drawn last, on top of everything) covers the outer
-            // borderWidth-thick strip. Anchoring from the top instead would
-            // let the text's body sink into that strip and get painted over
-            // by the border.
             let scanQRLineHeight = UIFont.systemFont(ofSize: 54, weight: .semibold).lineHeight
             Text("Scan QR to Flip it and Reply")
                 .font(.system(size: 54, weight: .semibold))
                 .foregroundColor(.white)
-                // Centered on the same horizontal span as the CardDrop
-                // wordmark (which is itself center-aligned within
-                // textBlockWidth), so the two share a horizontal center.
                 .frame(width: textBlockWidth, alignment: .center)
                 .offset(x: textBlockX + 40, y: height - 56 - scanQRLineHeight - 10 - 20 - 10)
         }

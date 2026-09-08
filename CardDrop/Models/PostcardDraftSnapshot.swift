@@ -39,7 +39,7 @@ struct TextOverlaySnapshot: Codable {
     var textR, textG, textB, textA: Double
     var bgStyleRaw: String
     var bgR, bgG, bgB, bgA: Double
-    var tailFlippedH: Bool
+    var tailFlippedH: Bool             // false=left, true=right
     var tailFlippedV: Bool
     var rotation: Double
     var isBold:   Bool
@@ -55,7 +55,7 @@ struct TextOverlaySnapshot: Codable {
         fontSize      = Double(overlay.fontSize)
         canvasWidth   = Double(overlay.canvasWidth)
         bgStyleRaw    = overlay.bgStyle.rawValue
-        tailFlippedH  = overlay.tailFlippedH
+        tailFlippedH  = overlay.tailHPosition == .right
         tailFlippedV  = overlay.tailFlippedV
         rotation      = overlay.rotation
         isBold        = overlay.isBold
@@ -79,7 +79,7 @@ struct TextOverlaySnapshot: Codable {
         o.textColor        = Color(red: textR, green: textG, blue: textB, opacity: textA)
         o.bgStyle          = TextBgStyle(rawValue: bgStyleRaw) ?? .none
         o.bgColor          = Color(red: bgR, green: bgG, blue: bgB, opacity: bgA)
-        o.tailFlippedH     = tailFlippedH
+        o.tailHPosition    = tailFlippedH ? .right : .left
         o.tailFlippedV     = tailFlippedV
         o.rotation         = rotation
         o.isBold           = isBold
@@ -121,6 +121,33 @@ struct BurstCaptionOverlaySnapshot: Codable {
     }
 }
 
+// MARK: - Greetings overlay snapshot
+
+struct GreetingsOverlaySnapshot: Codable {
+    var id: UUID
+    var word: String
+    var presetID: String
+    var fixedPositionRaw: String?    // Optional for backward-compatible decode
+    var backgroundOpacity: Double?   // Optional for backward-compatible decode
+
+    init(_ overlay: GreetingsOverlay) {
+        id                = overlay.id
+        word              = overlay.word
+        presetID          = overlay.presetID
+        fixedPositionRaw  = overlay.fixedPosition.rawValue
+        backgroundOpacity = Double(overlay.backgroundOpacity)
+    }
+
+    var toGreetingsOverlay: GreetingsOverlay {
+        var o = GreetingsOverlay(presetID: presetID)
+        o.id                = id
+        o.word              = word
+        o.fixedPosition     = fixedPositionRaw.flatMap { GreetingsFixedPosition(rawValue: $0) } ?? .center
+        o.backgroundOpacity = backgroundOpacity.map { CGFloat($0) } ?? 1.0
+        return o
+    }
+}
+
 // MARK: - Card status
 
 enum CardStatus: String, Codable {
@@ -153,6 +180,7 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
     // Text overlays
     var textOverlays: [TextOverlaySnapshot]
     var burstOverlays: [BurstCaptionOverlaySnapshot]?   // Optional for backward-compatible decode
+    var greetingsOverlays: [GreetingsOverlaySnapshot]?  // Optional for backward-compatible decode
     var qrOverlays: [QROverlaySnapshot]
 
     // Back of card
@@ -225,6 +253,7 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
         borderTextR = Double(bR); borderTextG = Double(bG); borderTextB = Double(bB)
         textOverlays           = draft.textOverlays.map { TextOverlaySnapshot($0) }
         burstOverlays          = draft.burstOverlays.map { BurstCaptionOverlaySnapshot($0) }
+        greetingsOverlays      = draft.greetingsOverlays.map { GreetingsOverlaySnapshot($0) }
         qrOverlays             = draft.qrOverlays.map { QROverlaySnapshot($0) }
 
         message          = draft.message
@@ -280,9 +309,10 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
         d.borderText      = borderText
         d.borderFontName  = borderFontName
         d.borderTextColor = Color(red: borderTextR, green: borderTextG, blue: borderTextB)
-        d.textOverlays   = textOverlays.map { $0.toTextOverlay }
-        d.burstOverlays  = (burstOverlays ?? []).map { $0.toBurstCaptionOverlay }
-        d.qrOverlays     = qrOverlays.map { $0.toQROverlay }
+        d.textOverlays      = textOverlays.map { $0.toTextOverlay }
+        d.burstOverlays     = (burstOverlays ?? []).map { $0.toBurstCaptionOverlay }
+        d.greetingsOverlays = (greetingsOverlays ?? []).map { $0.toGreetingsOverlay }
+        d.qrOverlays        = qrOverlays.map { $0.toQROverlay }
         d.message          = message
         d.senderNickname    = senderNickname ?? ""
         d.recipientNickname = recipientNickname ?? ""
@@ -324,14 +354,12 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
     // Human-readable step name for the draft list
     var stepLabel: String {
         switch currentStep {
-        case 0:  return "Names"
-        case 1:  return "Choosing photo"
-        case 2:  return "Styling it"
-        case 3:  return "Writing card"
-        case 4:  return "Invisible Ink"
-        case 5:  return "Addresses"
-        case 6:  return "Preview"
-        case 7:  return "Ready to send"
+        case 0:  return "Choosing photo"
+        case 1:  return "Styling it"
+        case 2:  return "Writing card"
+        case 3:  return "Invisible Ink"
+        case 4:  return "Addresses"
+        case 5:  return "Ready to send"
         default: return "In progress"
         }
     }
@@ -343,7 +371,7 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
         draft.recipientFirstName = parts.first ?? ""
         draft.recipientLastName  = parts.dropFirst().joined(separator: " ")
         draft.orientation        = isLandscape ? .landscape : .portrait
-        var s = PostcardDraftSnapshot(draft: draft, currentStep: 7, status: .sent,
+        var s = PostcardDraftSnapshot(draft: draft, currentStep: 5, status: .sent,
                                       existingID: nil, existingCreatedAt: sentAt)
         s.lastModified          = sentAt
         s.isRestoredFromServer  = true

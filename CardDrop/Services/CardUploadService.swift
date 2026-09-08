@@ -7,6 +7,11 @@ struct CardSendResult {
     let sendsRemainingMonthly: Int   // -1 = unlimited
     let sendsRemainingLifetime: Int  // -1 = unlimited
     let tier: String
+    // Hosted URL for the fanned front+back composite thumbnail, when one
+    // was uploaded (see CardUploadService.send's compositeData param) —
+    // used as the inline image in email sends, where an embedded cid:
+    // attachment doesn't render reliably across mail clients.
+    var compositeImageURL: URL? = nil
 }
 
 enum CardUploadService {
@@ -116,12 +121,15 @@ enum CardUploadService {
     /// Full send pipeline:
     /// 1. Upload front image to teaser-images/{cardID}.jpg  (serves as teaser + HTML front)
     /// 2. Upload back image to teaser-images/{cardID}_back.jpg
+    /// 2b. Upload 6x9 alt back image to teaser-images/{cardID}_back6x9.jpg, when available
     /// 3. Generate lightweight URL-based HTML and upload to card-html/{cardID}.html
     /// 4. Call send-card Edge Function → get cardURL + sendsRemaining
     static func send(
         cardID: UUID,
         frontData: Data,
         backData: Data,
+        back6x9Data: Data? = nil,
+        compositeData: Data? = nil,
         frontIsPortrait: Bool,
         frontInkMessage: String? = nil,
         backInkMessage: String? = nil,
@@ -157,8 +165,32 @@ enum CardUploadService {
                 options: FileOptions(contentType: "image/jpeg", upsert: true)
             )
 
+        // 2b. Upload 6x9 alt back image, when available (older drafts rendered
+        // before this layout existed won't have one on disk)
+        if let back6x9Data {
+            try await supabase.storage
+                .from("teaser-images")
+                .upload(
+                    "\(senderID)/\(idStr)_back6x9.jpg",
+                    data: back6x9Data,
+                    options: FileOptions(contentType: "image/jpeg", upsert: true)
+                )
+        }
+
+        // 2c. Upload the fanned front+back composite thumbnail, when
+        // available — used as the inline image in email sends.
+        var compositeImageURL: URL? = nil
+        if let compositeData {
+            let path = "\(senderID)/\(idStr)_composite.jpg"
+            try await supabase.storage
+                .from("teaser-images")
+                .upload(path, data: compositeData, options: FileOptions(contentType: "image/jpeg", upsert: true))
+            compositeImageURL = SupabaseConfig.projectURL
+                .appendingPathComponent("storage/v1/object/public/teaser-images/\(path)")
+        }
+
         // 3. Call send-card Edge Function
-        return try await callSendCardFunction(
+        var result = try await callSendCardFunction(
             cardID: cardID,
             isPortrait: frontIsPortrait,
             frontInkMessage: frontInkMessage,
@@ -170,6 +202,8 @@ enum CardUploadService {
             recipientEmail: recipientEmail,
             messagePreview: messagePreview
         )
+        result.compositeImageURL = compositeImageURL
+        return result
     }
 
     // MARK: - Edge Function

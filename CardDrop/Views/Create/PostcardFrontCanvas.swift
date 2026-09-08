@@ -6,6 +6,7 @@ struct PostcardFrontCanvas: View {
     let overlays: [TextOverlay]
     let qrOverlays: [QROverlay]
     let burstOverlays: [BurstCaptionOverlay]
+    let greetingsOverlays: [GreetingsOverlay]
     let size: CGSize
     var border: PostcardBorder = .fullBleed
     var orientation: PostcardOrientation = .landscape
@@ -15,7 +16,7 @@ struct PostcardFrontCanvas: View {
     var onQRLongPress: ((String) -> Void)? = nil
 
     init(image: UIImage?, overlays: [TextOverlay], qrOverlays: [QROverlay] = [],
-         burstOverlays: [BurstCaptionOverlay] = [], size: CGSize,
+         burstOverlays: [BurstCaptionOverlay] = [], greetingsOverlays: [GreetingsOverlay] = [], size: CGSize,
          border: PostcardBorder = .fullBleed, orientation: PostcardOrientation = .landscape,
          borderText: String = "", borderFontName: String = "Georgia", borderTextColor: Color = .black,
          onQRLongPress: ((String) -> Void)? = nil) {
@@ -23,6 +24,7 @@ struct PostcardFrontCanvas: View {
         self.overlays = overlays
         self.qrOverlays = qrOverlays
         self.burstOverlays = burstOverlays
+        self.greetingsOverlays = greetingsOverlays
         self.size = size
         self.border = border
         self.orientation = orientation
@@ -66,9 +68,52 @@ struct PostcardFrontCanvas: View {
                 } else {
                     Color.black.frame(width: imageAreaSize.width, height: imageAreaSize.height)
                 }
+                ForEach(burstOverlays) { burst in
+                    let preset = BurstPreset.find(burst.presetID)
+                    let bh = burst.normalizedHeight * imageAreaSize.height
+                    BurstCaptionView(text: burst.text, preset: preset, burstHeight: bh)
+                        .rotationEffect(Angle(degrees: burst.rotation))
+                        .position(
+                            x: burst.normalizedPosition.x * imageAreaSize.width,
+                            y: burst.normalizedPosition.y * imageAreaSize.height
+                        )
+                }
+                ForEach(greetingsOverlays) { greeting in
+                    // Rendered once as a bitmap at the canonical print
+                    // resolution (see GreetingsBadgeRenderer) — the exact
+                    // same code path/bitmap the live editor scales down to
+                    // preview, so the two can never drift apart. Scaled here
+                    // only if imageAreaSize is smaller than the true print
+                    // resolution (e.g. a bordered/inset front).
+                    let isLandscapeGreetings = imageAreaSize.width >= imageAreaSize.height
+                    let greetingsReferenceWidth: CGFloat = isLandscapeGreetings ? 2775 : 1875
+                    let greetingsDisplayScale = imageAreaSize.width / greetingsReferenceWidth
+                    if let rendered = GreetingsBadgeRenderer.render(overlay: greeting, isLandscape: isLandscapeGreetings) {
+                        // +75 bleed-margin match — see GreetingsCaptionView's identical fix.
+                        let badgeSize: CGSize = greeting.fixedPosition == .left
+                            ? CGSize(width: isLandscapeGreetings ? 2925 : 2000, height: rendered.size.height)
+                            : rendered.size
+                        let center = greeting.fixedPosition.center(badgeSize: badgeSize, canvasSize: CGSize(width: greetingsReferenceWidth, height: greetingsReferenceWidth * imageAreaSize.height / imageAreaSize.width))
+                        let w = rendered.size.width * greetingsDisplayScale
+                        let h = rendered.size.height * greetingsDisplayScale
+                        // The bitmap itself has a transparent background
+                        // (see GreetingsBadgeRenderer) — draw the badge
+                        // color underneath it here.
+                        ZStack {
+                            Rectangle().fill(greeting.badgeColorChoice.color.opacity(greeting.backgroundOpacity))
+                            Image(uiImage: rendered.image)
+                                .resizable()
+                        }
+                        .frame(width: w, height: h)
+                        .rotationEffect(Angle(degrees: greeting.fixedPosition.rotationDegrees))
+                        .position(x: center.x * greetingsDisplayScale, y: center.y * greetingsDisplayScale)
+                    }
+                }
                 ForEach(overlays) { overlay in
                     overlayView(overlay)
                 }
+                // QR (invisible ink) renders last so it's always on top of
+                // any other styling object it might share space with.
                 ForEach(qrOverlays) { qr in
                     if let img = makeQRImage(for: qr) {
                         let sz = QROverlay.fixedNormalizedSize * min(imageAreaSize.width, imageAreaSize.height)
@@ -85,16 +130,6 @@ struct PostcardFrontCanvas: View {
                                 y: qr.normalizedPosition.y * imageAreaSize.height
                             )
                     }
-                }
-                ForEach(burstOverlays) { burst in
-                    let preset = BurstPreset.find(burst.presetID)
-                    let bh = burst.normalizedHeight * imageAreaSize.height
-                    BurstCaptionView(text: burst.text, preset: preset, burstHeight: bh)
-                        .rotationEffect(Angle(degrees: burst.rotation))
-                        .position(
-                            x: burst.normalizedPosition.x * imageAreaSize.width,
-                            y: burst.normalizedPosition.y * imageAreaSize.height
-                        )
                 }
             }
             .frame(width: imageAreaSize.width, height: imageAreaSize.height)
@@ -128,51 +163,21 @@ struct PostcardFrontCanvas: View {
 
     @ViewBuilder
     private func overlayView(_ overlay: TextOverlay) -> some View {
-        let topPad: CGFloat = {
-            if overlay.bgStyle == .speech  && overlay.tailFlippedV { return SpeechBubbleShape.tailHeight }
-            if overlay.bgStyle == .thought && overlay.tailFlippedV { return ThoughtBubbleShape.tailHeight }
-            return 0
-        }()
-        let botPad: CGFloat = bottomPad(for: overlay)
+        // Editor-canvas-native size -> print-resolution-canvas size
+        // multiplier. See TextOverlayBubbleView's doc comment: that shared
+        // view is what guarantees this stays in sync with the live editor.
         let fontScale: CGFloat = overlay.canvasWidth > 0
             ? imageAreaSize.width / overlay.canvasWidth
             : 1
-        let scaledFontSize = overlay.fontSize * fontScale
-
-        Text(overlay.text.isEmpty ? " " : overlay.text)
-            .font(.custom(overlay.resolvedFontName, size: scaledFontSize))
-            .foregroundColor(overlay.textColor)
-            .padding(.horizontal, 10)
-            .padding(.top,    8 + topPad)
-            .padding(.bottom, 8 + botPad)
-            .background(bgShape(overlay))
-            .frame(maxWidth: overlay.normalizedWidth * imageAreaSize.width, alignment: .leading)
-            .rotationEffect(Angle(degrees: overlay.rotation))
-            .position(
-                x: overlay.normalizedPosition.x * imageAreaSize.width,
-                y: overlay.normalizedPosition.y * imageAreaSize.height
-            )
-    }
-
-    private func bottomPad(for overlay: TextOverlay) -> CGFloat {
-        if overlay.bgStyle == .speech  && !overlay.tailFlippedV { return SpeechBubbleShape.tailHeight }
-        if overlay.bgStyle == .thought && !overlay.tailFlippedV { return ThoughtBubbleShape.tailHeight }
-        return 0
-    }
-
-    @ViewBuilder
-    private func bgShape(_ overlay: TextOverlay) -> some View {
-        switch overlay.bgStyle {
-        case .none:
-            Color.clear
-        case .box:
-            RoundedRectangle(cornerRadius: 10).fill(overlay.bgColor)
-        case .speech:
-            SpeechBubbleShape(tailOnLeft: !overlay.tailFlippedH, tailOnBottom: !overlay.tailFlippedV)
-                .fill(overlay.bgColor)
-        case .thought:
-            ThoughtBubbleShape(tailOnLeft: !overlay.tailFlippedH, tailOnBottom: !overlay.tailFlippedV)
-                .fill(overlay.bgColor)
-        }
+        TextOverlayBubbleView(
+            overlay: overlay,
+            scale: fontScale,
+            boxWidth: overlay.normalizedWidth * imageAreaSize.width
+        )
+        .rotationEffect(Angle(degrees: overlay.rotation))
+        .position(
+            x: overlay.normalizedPosition.x * imageAreaSize.width,
+            y: overlay.normalizedPosition.y * imageAreaSize.height
+        )
     }
 }

@@ -62,13 +62,14 @@ struct ChangeEmailView: View {
                                     .padding(.vertical, 14)
                             } else {
                                 Text("Send Verification Link")
+                                    .font(.system(size: 17, weight: .semibold))
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 14)
                             }
                         }
                         .background(Color.brandBlue)
                         .foregroundColor(.white)
-                        .cornerRadius(12)
+                        .cornerRadius(999)
                         .disabled(isLoading || newEmail.isEmpty)
                     }
                     .padding(.horizontal)
@@ -79,14 +80,9 @@ struct ChangeEmailView: View {
             .animation(.easeInOut, value: didSend)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isLoading)
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction, isDisabled: isLoading) { dismiss() }
                 if didSend {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
-                    }
+                    toolbarPillItem("Done", placement: .confirmationAction, emphasis: .primary) { dismiss() }
                 }
             }
         }

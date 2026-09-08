@@ -85,13 +85,14 @@ struct CreateAccountView: View {
                                 .padding()
                         } else {
                             Text("Create Account")
+                                .font(.system(size: 17, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding()
                         }
                     }
                     .background(Color.brandBlue)
                     .foregroundColor(.white)
-                    .cornerRadius(12)
+                    .cornerRadius(999)
                     .disabled(isLoading || firstName.isEmpty || email.isEmpty || password.isEmpty)
                 }
                 .padding(.horizontal)
@@ -103,15 +104,10 @@ struct CreateAccountView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if isStandalone {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(isLoading)
-                }
+                toolbarPillItem("Cancel", placement: .cancellationAction, isDisabled: isLoading) { dismiss() }
             }
             if didSucceed {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
+                toolbarPillItem("Done", placement: .confirmationAction, emphasis: .primary) { dismiss() }
             }
         }
         .animation(.easeInOut, value: didSucceed)
