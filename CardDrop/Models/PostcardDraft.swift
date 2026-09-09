@@ -57,6 +57,15 @@ class PostcardDraft: ObservableObject {
     var moderationState: ModerationState = .untested
     var imageModeratedState: ModerationState = .untested
 
+    // Transient — not persisted. Write Card's To/From nicknames are
+    // required to move forward (but not backward); these flip true on a
+    // blocked forward-navigation attempt — from either the step's own Next
+    // button or the wizard's forward chevron — and clear as soon as the
+    // corresponding field is edited. @Published since MessageStepView's
+    // fields observe them directly to draw a red outline.
+    @Published var showRecipientNicknameError = false
+    @Published var showSenderNicknameError = false
+
     // Casual nicknames, entered in the first flow step
     @Published var senderNickname: String = ""
     @Published var recipientNickname: String = ""

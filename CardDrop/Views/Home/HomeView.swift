@@ -69,7 +69,7 @@ struct HomeView: View {
             .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    CardDropWordmark(font: .headline.bold(), dropOffset: 4)
+                    CardDropWordmark(size: 17, dropOffset: 4)
                 }
             }
             .fullScreenCover(isPresented: $showCreateFlow) {

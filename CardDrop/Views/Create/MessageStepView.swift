@@ -17,10 +17,24 @@ struct MessageStepView: View {
     @State private var greetings: [CardbackGreeting] = []
     @State private var phrases: [CardbackPhrase] = []
 
+    // From/To — also editable on Choose Photo, but since names are now
+    // optional there (see [[project_choose_photo_step_split]] / the session
+    // that dropped the namesFilled gate), this gives a second chance to
+    // fill them in or fix a typo without having to go back a step.
+    @State private var nicknameSyncTask: Task<Void, Never>?
+    @State private var showToContactPicker = false
+    @State private var contactPickedNickname: String?
+
+    private var usedContactPickerForTo: Bool {
+        contactPickedNickname != nil && contactPickedNickname == draft.recipientNickname
+    }
+
     private static let phraseCategories = ["All", "Basic", "Romantic", "Quirky"]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
+
+            fromToRow
 
             CompactSegmentedControl(options: Self.phraseCategories, selection: $draft.phraseCategory)
                 .opacity(phrases.isEmpty ? 0 : 1)
@@ -131,6 +145,13 @@ struct MessageStepView: View {
 
                 Button {
                     focus = nil
+
+                    let recipientMissing = draft.recipientNickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let senderMissing = draft.senderNickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    draft.showRecipientNicknameError = recipientMissing
+                    draft.showSenderNicknameError = senderMissing
+                    guard !recipientMissing && !senderMissing else { return }
+
                     if draft.moderationState == .passed {
                         onNext()
                         return
@@ -242,6 +263,87 @@ struct MessageStepView: View {
             return
         }
         draft.phraseText = p.text
+    }
+
+    // Same From/To control as Choose Photo (ChoosePhotoStepView.fromToRow) —
+    // kept in sync by hand rather than shared, since the two steps' layouts
+    // don't otherwise share a common container.
+    private var fromToRow: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center, spacing: 12) {
+                HStack(spacing: 6) {
+                    Text("To")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundColor(.brandBlue)
+                    Button {
+                        showToContactPicker = true
+                    } label: {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                            .foregroundColor(.accentColor)
+                            .frame(minWidth: 28, minHeight: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    TextField("e.g. Grandma & Grandpa", text: $draft.recipientNickname)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(draft.showRecipientNicknameError ? Color.red : Color(.systemGray4), lineWidth: draft.showRecipientNicknameError ? 1.5 : 1)
+                        )
+                        .onChange(of: draft.recipientNickname) { _, _ in draft.showRecipientNicknameError = false }
+                }
+                .frame(maxWidth: .infinity)
+
+                HStack(spacing: 6) {
+                    Text("From")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundColor(.brandBlue)
+                    TextField("e.g. Pookie", text: $draft.senderNickname)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(draft.showSenderNicknameError ? Color.red : Color(.systemGray4), lineWidth: draft.showSenderNicknameError ? 1.5 : 1)
+                        )
+                        .onChange(of: draft.senderNickname) { _, newValue in
+                            draft.showSenderNicknameError = false
+                            nicknameSyncTask?.cancel()
+                            nicknameSyncTask = Task {
+                                try? await Task.sleep(nanoseconds: 800_000_000)
+                                guard !Task.isCancelled else { return }
+                                await UserService.updateSenderNickname(newValue)
+                            }
+                        }
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            if usedContactPickerForTo {
+                Text("Edit to use a different nickname, sunshine")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundColor(.brandBlue)
+                    .padding(.leading, 8)
+            }
+        }
+        .padding(.bottom, 8)
+        .sheet(isPresented: $showToContactPicker) {
+            ContactNamePickerView { info in
+                if !info.nickname.isEmpty { draft.recipientNickname = info.nickname }
+                contactPickedNickname = draft.recipientNickname
+                draft.recipientFirstName = info.firstName
+                draft.recipientLastName  = info.lastName
+                draft.recipientStreet    = info.street
+                draft.recipientCity      = info.city
+                draft.recipientState     = info.state
+                draft.recipientZip       = info.zip
+                draft.recipientCountry   = info.country
+                draft.recipientEmail     = info.email
+                draft.recipientPhone     = info.phone
+            }
+        }
     }
 }
 

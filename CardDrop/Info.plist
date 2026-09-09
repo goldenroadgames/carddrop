@@ -5,9 +5,12 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>Caveat-SemiBold.ttf</string>
+		<string>Inter-ExtraBold.ttf</string>
 	</array>
 	<key>NSContactsUsageDescription</key>
 	<string>CardDrop uses your contacts to help you address cards to recipients.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>CardDrop saves photos you choose to your camera roll.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

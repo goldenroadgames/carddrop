@@ -27,7 +27,15 @@ class AuthManager: ObservableObject {
 
     init() {
         Task { @MainActor in
-            for await (_, session) in supabase.auth.authStateChanges {
+            // supabase-swift's next major version will emit the locally
+            // cached session as `.initialSession` unconditionally, even if
+            // it's expired/invalid, and expects callers to check
+            // `isExpired` themselves (see supabase/supabase-swift#822).
+            // Guarding here now makes us forward-compatible with that
+            // change instead of silently treating a stale session as
+            // "logged in" once it lands.
+            for await (_, rawSession) in supabase.auth.authStateChanges {
+                let session = (rawSession?.isExpired == true) ? nil : rawSession
                 self.isAuthenticated = session != nil
                 self.isAnonymous = session?.user.isAnonymous == true
                 self.isEmailVerified = session?.user.isAnonymous == false

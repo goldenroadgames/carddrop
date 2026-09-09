@@ -44,11 +44,6 @@ struct CreateFlowView: View {
 
     var hasStarted: Bool { draft.image != nil }
 
-    var namesFilled: Bool {
-        !draft.senderNickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !draft.recipientNickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     var body: some View {
         NavigationStack {
             Group {
@@ -306,6 +301,18 @@ struct CreateFlowView: View {
                 .disabled(currentStep == 0)
 
                 Button {
+                    // Write Card's To/From nicknames are required to move
+                    // forward — the step's own Next button enforces this
+                    // too, but this chevron is a second forward-navigation
+                    // path that would otherwise skip straight past it.
+                    if currentStep == 2 {
+                        let recipientMissing = draft.recipientNickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        let senderMissing = draft.senderNickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        draft.showRecipientNicknameError = recipientMissing
+                        draft.showSenderNicknameError = senderMissing
+                        guard !recipientMissing && !senderMissing else { return }
+                    }
+
                     let next = nextStep(from: currentStep)
                     if currentStep >= 2 && draft.moderationState == .untested {
                         Task {
@@ -334,13 +341,13 @@ struct CreateFlowView: View {
                         }
                     }
                     .foregroundColor(
-                        (currentStep >= 5 || (currentStep == 0 && (!hasStarted || !namesFilled)) || isModerating)
+                        (currentStep >= 5 || (currentStep == 0 && !hasStarted) || isModerating)
                             ? Color.brandBlue.opacity(0.4) : Color.brandBlue
                     )
                     .frame(width: 36, height: 32)
                 }
                 .buttonStyle(.plain)
-                .disabled(currentStep >= 5 || (currentStep == 0 && (!hasStarted || !namesFilled)) || isModerating)
+                .disabled(currentStep >= 5 || (currentStep == 0 && !hasStarted) || isModerating)
             }
         }
     }

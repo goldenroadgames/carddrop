@@ -1,4 +1,5 @@
 import SwiftUI
+import Photos
 
 // Opens when a Sent card is tapped — a summary/hub for that card instead of
 // dropping straight back into the Create flow's Send step: preview, who it
@@ -28,6 +29,7 @@ struct SentCardDetailSheet: View {
     @State private var reactions: [CardReaction] = []
     @State private var replies: [CardReply] = []
     @State private var isLoading = true
+    @State private var selectedPhoto: PhotoRef? = nil
 
     private var aspectRatio: CGFloat { snapshot.orientationIsLandscape ? 3.0 / 2.0 : 2.0 / 3.0 }
 
@@ -36,13 +38,16 @@ struct SentCardDetailSheet: View {
             VStack(spacing: 0) {
                 previewSection
                     .padding(.top, 8)
+                    .padding(.bottom, 8)
 
                 ScrollView {
-                    VStack(spacing: 24) {
+                    VStack(spacing: 0) {
                         repliesSection
+                        photoRepliesSection
                         sendHistorySection
+                            .padding(.top, 24)
                     }
-                    .padding(.top, 16)
+                    .padding(.top, 12)
                     .padding(.bottom, 24)
                 }
             }
@@ -54,6 +59,9 @@ struct SentCardDetailSheet: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 actionBar
             }
+        }
+        .fullScreenCover(item: $selectedPhoto) { photo in
+            ReplyPhotoViewer(url: photo.url)
         }
         .task {
             frontImage   = snapshot.cardID.flatMap { draftManager.loadFront(for: $0) }
@@ -118,6 +126,7 @@ struct SentCardDetailSheet: View {
                         .font(.system(size: 15, weight: .regular))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 4)
             }
         }
         .padding(.horizontal, 16)
@@ -201,10 +210,9 @@ struct SentCardDetailSheet: View {
                     .padding(.horizontal, 16)
             } else if !replies.isEmpty {
                 VStack(spacing: 0) {
-                    ForEach(Array(replies.enumerated()), id: \.element.id) { index, reply in
-                        if index > 0 { Divider() }
+                    ForEach(replies) { reply in
                         ReplyRow(reply: reply)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 4)
                             .padding(.horizontal, 16)
                     }
                 }
@@ -214,6 +222,58 @@ struct SentCardDetailSheet: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Photo Replies
+
+    private var photoReplyURLs: [(id: UUID, url: URL)] {
+        replies.compactMap { reply in
+            guard let urlString = reply.reply_image_url, let url = URL(string: urlString) else { return nil }
+            return (reply.id, url)
+        }
+    }
+
+    private var photoRepliesSection: some View {
+        Group {
+            if !photoReplyURLs.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Photo Replies")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.brandBlue)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4), GridItem(.flexible(), spacing: 4)], spacing: 4) {
+                        ForEach(photoReplyURLs, id: \.id) { entry in
+                            Button(action: { selectedPhoto = PhotoRef(url: entry.url) }) {
+                                AsyncImage(url: entry.url) { phase in
+                                    switch phase {
+                                    case .success(let image):
+                                        // Full photo, own aspect ratio, no
+                                        // crop — a shrunk copy, not a tile.
+                                        image.resizable().aspectRatio(contentMode: .fit)
+                                            .cornerRadius(8)
+                                    case .failure:
+                                        Color(.secondarySystemBackground)
+                                            .frame(height: 110)
+                                            .cornerRadius(8)
+                                    default:
+                                        Color(.secondarySystemBackground)
+                                            .frame(height: 110)
+                                            .overlay(ProgressView())
+                                            .cornerRadius(8)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 
     // MARK: - Actions
@@ -253,6 +313,109 @@ struct SentCardDetailSheet: View {
     }
 }
 
+private struct PhotoRef: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+// Full-screen photo-reply viewer — tap a thumbnail in the "Photo Replies"
+// grid to land here, with a save-to-camera-roll action. Downloads its own
+// UIImage (rather than reusing AsyncImage's SwiftUI Image) since saving to
+// Photos needs the raw UIImage, not a renderable view.
+private struct ReplyPhotoViewer: View {
+    let url: URL
+    @Environment(\.dismiss) private var dismiss
+    @State private var image: UIImage? = nil
+    @State private var isSaving = false
+    @State private var statusMessage: String? = nil
+
+    var body: some View {
+        ZStack {
+            Color(white: 0.93).ignoresSafeArea()
+
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                ProgressView()
+            }
+
+            VStack {
+                HStack {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 21, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(width: 45, height: 45)
+                            .background(Color.brandBlue)
+                            .clipShape(Circle())
+                    }
+                    Spacer()
+                    if image != nil {
+                        Button(action: save) {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 21, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 45, height: 45)
+                                .background(Color.brandBlue)
+                                .clipShape(Circle())
+                        }
+                        .disabled(isSaving)
+                    }
+                }
+                .padding(16)
+
+                Spacer()
+
+                if let statusMessage {
+                    Text(statusMessage)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.brandBlue)
+                        .cornerRadius(999)
+                        .padding(.bottom, 24)
+                }
+            }
+        }
+        .task {
+            guard image == nil, let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+            image = UIImage(data: data)
+        }
+    }
+
+    private func save() {
+        guard let image, !isSaving else { return }
+        isSaving = true
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            DispatchQueue.main.async {
+                guard status == .authorized || status == .limited else {
+                    isSaving = false
+                    showStatus("Enable Photos access in Settings to save")
+                    return
+                }
+                PHPhotoLibrary.shared().performChanges({
+                    PHAssetChangeRequest.creationRequestForAsset(from: image)
+                }) { success, _ in
+                    DispatchQueue.main.async {
+                        isSaving = false
+                        showStatus(success ? "Saved to Photos" : "Couldn't save photo")
+                    }
+                }
+            }
+        }
+    }
+
+    private func showStatus(_ text: String) {
+        statusMessage = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            if statusMessage == text { statusMessage = nil }
+        }
+    }
+}
+
 private struct ReplyRow: View {
     let reply: CardReply
 
@@ -261,25 +424,25 @@ private struct ReplyRow: View {
         return date.formatted(.dateTime.month(.abbreviated).day().year())
     }
 
+    // Non-breaking spaces inside the date so it wraps as one unbreakable
+    // unit (e.g. "Sep 8, 2026") when appended to the end of reply text,
+    // rather than splitting mid-date across lines.
+    private var nonBreakingDateLabel: String {
+        dateLabel.replacingOccurrences(of: " ", with: "\u{00A0}")
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let urlString = reply.reply_image_url, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFit().frame(maxWidth: .infinity).cornerRadius(8)
-                    case .failure, .empty:
-                        EmptyView()
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-            }
+        Group {
             if let text = reply.reply_text, !text.isEmpty {
-                Text(text)
-                    .font(.system(size: 15, weight: .regular))
-            }
-            if !dateLabel.isEmpty {
+                if !dateLabel.isEmpty {
+                    Text(text).font(.system(size: 15, weight: .regular))
+                    + Text("  ").font(.system(size: 13, weight: .regular))
+                    + Text(nonBreakingDateLabel).font(.system(size: 13, weight: .regular)).foregroundColor(.gray)
+                } else {
+                    Text(text)
+                        .font(.system(size: 15, weight: .regular))
+                }
+            } else if !dateLabel.isEmpty {
                 Text(dateLabel)
                     .font(.system(size: 13, weight: .regular))
                     .foregroundColor(.gray)

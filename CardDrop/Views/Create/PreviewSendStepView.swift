@@ -258,7 +258,6 @@ struct SendOptionsView: View {
             if let result = cardSendResult {
                 MessageComposeView(
                     teaserImage: teaserImage,
-                    backImage: backRenderImage,
                     cardURL: result.cardURL,
                     recipients: pendingMessageRecipients.map(\.value),
                     cardID: result.cardID,
@@ -671,14 +670,10 @@ struct SendOptionsView: View {
 
         teaserImage = draftManager.loadFront(for: draft.cardID)
 
-        // Same fanned front+back composite used as the SMS attachment,
-        // uploaded here so email can reference it by URL instead — an
-        // embedded cid: attachment doesn't render reliably across mail
+        // Plain card front, uploaded here so email can reference it by URL
+        // — an embedded cid: attachment doesn't render reliably across mail
         // clients (confirmed broken in Gmail).
-        let compositeData: Data? = {
-            guard let front = teaserImage, let back = backRenderImage else { return nil }
-            return PostcardHTMLGenerator.stackedThumbnail(front: front, back: back).jpegData(compressionQuality: 0.8)
-        }()
+        let compositeData: Data? = frontData
 
         // Upload + call Edge Function
         isSending = true
@@ -793,7 +788,6 @@ struct MailComposeView: UIViewControllerRepresentable {
 
 struct MessageComposeView: UIViewControllerRepresentable {
     var teaserImage: UIImage?
-    var backImage: UIImage?
     var cardURL: URL
     var recipients: [String]
     var cardID: UUID
@@ -809,8 +803,7 @@ struct MessageComposeView: UIViewControllerRepresentable {
         let from = senderNickname?.isEmpty == false ? senderNickname! : "You"
         vc.body = "\(from) sent a CardDrop\nTap to open it.\n\n\n\(cardURL.absoluteString)"
         if let img = teaserImage {
-            let thumbnail = backImage.map { PostcardHTMLGenerator.stackedThumbnail(front: img, back: $0) }
-                ?? PostcardHTMLGenerator.scaledForThumbnail(img)
+            let thumbnail = PostcardHTMLGenerator.scaledForThumbnail(img)
             if let data = thumbnail.jpegData(compressionQuality: 0.7) {
                 vc.addAttachmentData(data, typeIdentifier: "public.jpeg", filename: "postcard.jpg")
             }

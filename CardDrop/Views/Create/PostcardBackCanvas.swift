@@ -484,7 +484,7 @@ private struct BrandingBand: View {
 
             VStack(alignment: .center, spacing: 0) {
                 CardDropWordmark(
-                    font: .system(size: wordmarkSize, weight: .bold),
+                    size: wordmarkSize,
                     dropOffset: 30,
                     color: .white
                 )

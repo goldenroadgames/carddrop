@@ -45,11 +45,6 @@ struct ChoosePhotoStepView: View {
 
     private var hasStarted: Bool { draft.image != nil }
 
-    private var namesFilled: Bool {
-        !draft.senderNickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !draft.recipientNickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     private var usedContactPickerForTo: Bool {
         contactPickedNickname != nil && contactPickedNickname == draft.recipientNickname
     }
@@ -138,11 +133,11 @@ struct ChoosePhotoStepView: View {
                             .font(.system(size: 17, weight: .semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
-                            .background((hasStarted && namesFilled) ? Color.brandBlue : Color.gray)
+                            .background(hasStarted ? Color.brandBlue : Color.gray)
                             .foregroundColor(.white)
                             .cornerRadius(999)
                     }
-                    .disabled(!(hasStarted && namesFilled))
+                    .disabled(!hasStarted)
                     .padding(.horizontal)
                     .padding(.vertical, 12)
                 }
@@ -327,28 +322,26 @@ struct ChoosePhotoStepView: View {
     // From/To nickname entry — half-width side by side (label above field).
     private var fromToRow: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .center, spacing: 12) {
+                HStack(spacing: 6) {
                     Text("To")
                         .font(.system(size: 15, weight: .regular))
                         .foregroundColor(.brandBlue)
-                    HStack(spacing: 8) {
-                        Button {
-                            showToContactPicker = true
-                        } label: {
-                            Image(systemName: "person.crop.circle.badge.plus")
-                                .foregroundColor(.accentColor)
-                                .frame(minWidth: 28, minHeight: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        TextField("e.g. Grandma & Grandpa", text: $draft.recipientNickname)
-                            .textFieldStyle(.roundedBorder)
+                    Button {
+                        showToContactPicker = true
+                    } label: {
+                        Image(systemName: "person.crop.circle.badge.plus")
+                            .foregroundColor(.accentColor)
+                            .frame(minWidth: 28, minHeight: 28)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    TextField("e.g. Grandma & Grandpa", text: $draft.recipientNickname)
+                        .textFieldStyle(.roundedBorder)
                 }
                 .frame(maxWidth: .infinity)
 
-                VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
                     Text("From")
                         .font(.system(size: 15, weight: .regular))
                         .foregroundColor(.brandBlue)
