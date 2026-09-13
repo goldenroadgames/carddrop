@@ -25,6 +25,15 @@ struct CardRenderer {
     static let frontLongSideBleed:  CGFloat = 2775
     static let frontShortSideBleed: CGFloat = 1875
 
+    // Back bleed margin: LOB's spec calls for 0.125in bleed on each edge
+    // (see [[project_lob_specs]]). Both back canvases render at 450 DPI
+    // trim size (2700x1800 for 4x6, 4050x2700 for 6x9), so this margin is
+    // just applied as flat white padding post-render rather than rendering
+    // the back's own content larger — the back's content is already inset
+    // from every edge by borderWidth, so a plain white margin is invisible
+    // against it. 0.125in * 450 DPI = 56.25pt.
+    static let backBleedMarginPoints: CGFloat = 56.25
+
     static func renderAndSave(draft: PostcardDraft, filteredImage: UIImage?, draftManager: DraftManager) -> (front: UIImage, back: UIImage, back6x9: UIImage)? {
         let frontSize: CGSize = draft.orientation == .landscape
             ? CGSize(width: frontLongSideBleed, height: frontShortSideBleed)
@@ -67,7 +76,15 @@ struct CardRenderer {
         bRenderer.proposedSize = ProposedViewSize(backSize)
         bRenderer.isOpaque = true
         bRenderer.scale = 1
-        guard let backImg = bRenderer.uiImage else { return nil }
+        guard let backRaw = bRenderer.uiImage, let backImg = paddedToBleed(backRaw) else { return nil }
+
+        let bForLOBRenderer = ImageRenderer(
+            content: PostcardBackCanvas(draft: draft, size: backSize, qr1Image: qr1Image, qr2Image: qr2Image, forLOB: true)
+        )
+        bForLOBRenderer.proposedSize = ProposedViewSize(backSize)
+        bForLOBRenderer.isOpaque = true
+        bForLOBRenderer.scale = 1
+        guard let backForLOBRaw = bForLOBRenderer.uiImage, let backForLOBImg = paddedToBleed(backForLOBRaw) else { return nil }
 
         // Alternate 6x9 back — unwired from the send flow/draft model still
         // (see PostcardBackCanvas6x9's own doc comment), but rendered and
@@ -79,13 +96,40 @@ struct CardRenderer {
         b6x9Renderer.proposedSize = ProposedViewSize(back6x9Size)
         b6x9Renderer.isOpaque = true
         b6x9Renderer.scale = 1
-        guard let back6x9Img = b6x9Renderer.uiImage else { return nil }
+        guard let back6x9Raw = b6x9Renderer.uiImage, let back6x9Img = paddedToBleed(back6x9Raw) else { return nil }
+
+        let b6x9ForLOBRenderer = ImageRenderer(
+            content: PostcardBackCanvas6x9(draft: draft, size: back6x9Size, qr1Image: qr1Image, qr2Image: qr2Image, forLOB: true)
+        )
+        b6x9ForLOBRenderer.proposedSize = ProposedViewSize(back6x9Size)
+        b6x9ForLOBRenderer.isOpaque = true
+        b6x9ForLOBRenderer.scale = 1
+        guard let back6x9ForLOBRaw = b6x9ForLOBRenderer.uiImage, let back6x9ForLOBImg = paddedToBleed(back6x9ForLOBRaw) else { return nil }
 
         draftManager.saveFront(frontImg, cardID: draft.cardID)
         draftManager.saveBack(backImg, cardID: draft.cardID)
         draftManager.saveBack6x9(back6x9Img, cardID: draft.cardID)
+        draftManager.saveBackForLOB(backForLOBImg, cardID: draft.cardID)
+        draftManager.saveBack6x9ForLOB(back6x9ForLOBImg, cardID: draft.cardID)
 
         return (front: frontImg, back: backImg, back6x9: back6x9Img)
+    }
+
+    /// Pads a trim-size back render out to bleed size with a flat white
+    /// margin (see `backBleedMarginPoints`) — the back's content is already
+    /// inset from every edge, so this is invisible against it.
+    private static func paddedToBleed(_ image: UIImage) -> UIImage? {
+        let m = backBleedMarginPoints
+        let newSize = CGSize(width: image.size.width + m * 2, height: image.size.height + m * 2)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
+        return renderer.image { _ in
+            UIColor.white.setFill()
+            UIRectFill(CGRect(origin: .zero, size: newSize))
+            image.draw(at: CGPoint(x: m, y: m))
+        }
     }
 
     private static func makeQRCode(from string: String) -> UIImage? {

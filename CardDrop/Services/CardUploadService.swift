@@ -119,9 +119,11 @@ enum CardUploadService {
     }
 
     /// Full send pipeline:
-    /// 1. Upload front image to teaser-images/{cardID}.jpg  (serves as teaser + HTML front)
-    /// 2. Upload back image to teaser-images/{cardID}_back.jpg
-    /// 2b. Upload 6x9 alt back image to teaser-images/{cardID}_back6x9.jpg, when available
+    /// 1. Upload front image to card-images/{cardID}.jpg  (serves as teaser + HTML front)
+    /// 2. Upload back image to card-images/{cardID}_back.jpg
+    /// 2b. Upload 6x9 alt back image to card-images/{cardID}_back6x9.jpg, when available
+    /// 2c. Upload forLOB (blank no-ink zone) back samples, when available — test-only
+    ///     files for manually exercising LOB's API, not used by any real send yet
     /// 3. Generate lightweight URL-based HTML and upload to card-html/{cardID}.html
     /// 4. Call send-card Edge Function → get cardURL + sendsRemaining
     static func send(
@@ -129,6 +131,8 @@ enum CardUploadService {
         frontData: Data,
         backData: Data,
         back6x9Data: Data? = nil,
+        backForLOBData: Data? = nil,
+        back6x9ForLOBData: Data? = nil,
         compositeData: Data? = nil,
         frontIsPortrait: Bool,
         frontInkMessage: String? = nil,
@@ -149,7 +153,7 @@ enum CardUploadService {
 
         // 1. Upload front image (also serves as teaser for email/SMS previews)
         try await supabase.storage
-            .from("teaser-images")
+            .from("card-images")
             .upload(
                 "\(senderID)/\(idStr).jpg",
                 data: frontData,
@@ -158,7 +162,7 @@ enum CardUploadService {
 
         // 2. Upload back image
         try await supabase.storage
-            .from("teaser-images")
+            .from("card-images")
             .upload(
                 "\(senderID)/\(idStr)_back.jpg",
                 data: backData,
@@ -169,7 +173,7 @@ enum CardUploadService {
         // before this layout existed won't have one on disk)
         if let back6x9Data {
             try await supabase.storage
-                .from("teaser-images")
+                .from("card-images")
                 .upload(
                     "\(senderID)/\(idStr)_back6x9.jpg",
                     data: back6x9Data,
@@ -177,16 +181,38 @@ enum CardUploadService {
                 )
         }
 
-        // 2c. Upload the fanned front+back composite thumbnail, when
+        // 2c. Upload the forLOB (blank no-ink zone) back test samples, when
+        // available — lets LOB's API be exercised manually against real
+        // hosted files; not consumed by any real send flow yet.
+        if let backForLOBData {
+            try await supabase.storage
+                .from("card-images")
+                .upload(
+                    "\(senderID)/\(idStr)_back_forLOB.jpg",
+                    data: backForLOBData,
+                    options: FileOptions(contentType: "image/jpeg", upsert: true)
+                )
+        }
+        if let back6x9ForLOBData {
+            try await supabase.storage
+                .from("card-images")
+                .upload(
+                    "\(senderID)/\(idStr)_back6x9_forLOB.jpg",
+                    data: back6x9ForLOBData,
+                    options: FileOptions(contentType: "image/jpeg", upsert: true)
+                )
+        }
+
+        // 2d. Upload the fanned front+back composite thumbnail, when
         // available — used as the inline image in email sends.
         var compositeImageURL: URL? = nil
         if let compositeData {
             let path = "\(senderID)/\(idStr)_composite.jpg"
             try await supabase.storage
-                .from("teaser-images")
+                .from("card-images")
                 .upload(path, data: compositeData, options: FileOptions(contentType: "image/jpeg", upsert: true))
             compositeImageURL = SupabaseConfig.projectURL
-                .appendingPathComponent("storage/v1/object/public/teaser-images/\(path)")
+                .appendingPathComponent("storage/v1/object/public/card-images/\(path)")
         }
 
         // 3. Call send-card Edge Function

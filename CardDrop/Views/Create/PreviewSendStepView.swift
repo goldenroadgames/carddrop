@@ -667,6 +667,8 @@ struct SendOptionsView: View {
         guard let frontData = draftManager.loadFrontData(for: draft.cardID),
               let backData  = draftManager.loadBackData(for: draft.cardID) else { return }
         let back6x9Data = draftManager.loadBack6x9Data(for: draft.cardID)
+        let backForLOBData = draftManager.loadBackForLOBData(for: draft.cardID)
+        let back6x9ForLOBData = draftManager.loadBack6x9ForLOBData(for: draft.cardID)
 
         teaserImage = draftManager.loadFront(for: draft.cardID)
 
@@ -686,6 +688,8 @@ struct SendOptionsView: View {
                 frontData: frontData,
                 backData: backData,
                 back6x9Data: back6x9Data,
+                backForLOBData: backForLOBData,
+                back6x9ForLOBData: back6x9ForLOBData,
                 compositeData: compositeData,
                 frontIsPortrait: draft.orientation == .portrait,
                 frontInkMessage: frontInk,

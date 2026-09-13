@@ -10,7 +10,14 @@ enum CardDeleteService {
         let senderID = (try? await supabase.auth.session.user)?.id.uuidString.lowercased() ?? ""
 
         // Storage files first (no FK constraints)
-        try? await supabase.storage.from("teaser-images").remove(paths: ["\(senderID)/\(id).jpg", "\(senderID)/\(id)_back.jpg", "\(senderID)/\(id)_back6x9.jpg"])
+        try? await supabase.storage.from("card-images").remove(paths: [
+            "\(senderID)/\(id).jpg",
+            "\(senderID)/\(id)_back.jpg",
+            "\(senderID)/\(id)_back6x9.jpg",
+            "\(senderID)/\(id)_back_forLOB.jpg",
+            "\(senderID)/\(id)_back6x9_forLOB.jpg",
+            "\(senderID)/\(id)_composite.jpg"
+        ])
 
         // Child table rows (before parent to satisfy FK constraints)
         try? await supabase.from("replies")         .delete().eq("card_id", value: id).execute()

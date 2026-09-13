@@ -39,7 +39,7 @@ enum CardRestoreService {
         guard let senderID = (try? await supabase.auth.session.user)?.id.uuidString.lowercased() else { return }
         let path = "\(senderID)/\(card.id.uuidString).jpg"
         guard let imageData = try? await supabase.storage
-            .from("teaser-images")
+            .from("card-images")
             .download(path: path)
         else { return }
 
