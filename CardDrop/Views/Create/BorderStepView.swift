@@ -16,7 +16,7 @@ struct BorderStepView: View {
     // Preview text/color for the canvas (placeholder when empty in customText mode)
     private var previewText: String {
         if draft.border == .decorative { return draft.borderText }
-        return draft.borderText.isEmpty ? "CardDrop - The OG Personal Messenger" : draft.borderText
+        return draft.borderText.isEmpty ? "CardDrop - On. The. FRIDGE." : draft.borderText
     }
     private var previewColor: Color {
         if draft.border == .decorative { return draft.borderTextColor }

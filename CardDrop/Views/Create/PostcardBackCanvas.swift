@@ -155,7 +155,10 @@ private struct InkZoneContent: View {
     private let phraseSideMargin: CGFloat = 250
 
     private var sharedFont: UIFont {
-        UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        // UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        // UIFont(name: "SpecialElite-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        // UIFont(name: "CourierPrime-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        UIFont(name: "AmericanTypewriter", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
     }
 
     var body: some View {
@@ -311,8 +314,8 @@ private struct MessagePolygonLabel: View {
     let boundingWidth: CGFloat
     let boundingHeight: CGFloat
 
-    private let fontSize: CGFloat = 98
-    private let lineHeight: CGFloat = 97 // 0.91x — tuned for 3/3/6 line split across zones A/B/C
+    private let fontSize: CGFloat = 84
+    private let lineHeight: CGFloat = 86
 
     private let startIndent: CGFloat = 50
 
@@ -321,7 +324,10 @@ private struct MessagePolygonLabel: View {
 
     var body: some View {
         Canvas { context, _ in
-            let font = UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            // let font = UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            // let font = UIFont(name: "SpecialElite-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            // let font = UIFont(name: "CourierPrime-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            let font = UIFont(name: "AmericanTypewriter", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
 
             // Start at a fixed position (line 2's slot, still inside the
             // wide Zone A), indented, instead of the very top, so typing

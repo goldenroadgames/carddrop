@@ -26,41 +26,40 @@ enum GreetingsBadgeRenderer {
     /// with `renderer.scale = 1` so 1 point == 1 print pixel) — this exact
     /// size should be used for fixed-position placement instead of
     /// `GreetingsGeometry.estimatedBadgeSize()`'s approximation.
-    // Minimum clearance the big word's own letters must keep from the
-    // card's left/right edges — 1/4in at 300dpi.
+    // Minimum clearance the letters' own badge box keeps from its
+    // (unrotated) edge — 1/4in at 300dpi. Purely cosmetic inset around the
+    // letters; NOT what guarantees card-edge clearance (see cardEdgeClearance).
     static let letterEdgeClearance: CGFloat = 75
+
+    // Guaranteed minimum clearance from the CARD's own left/right edges —
+    // 0.5in at 300dpi. Applies to both .center (via the maxBadgeWidth cap
+    // below, since a centered badge's clearance is exactly (canvasWidth -
+    // badgeWidth)/2) and .left/Tilt (via the rotated-bounding-box math in
+    // GreetingsFixedPosition.center()) — must match the literal `150` used
+    // there.
+    static let cardEdgeClearance: CGFloat = 150
 
     static func render(overlay: GreetingsOverlay, isLandscape: Bool) -> (image: UIImage, size: CGSize)? {
         let referenceWidth: CGFloat = isLandscape ? 2775 : 1875
         let preset = GreetingsPreset.find(overlay.presetID)
         let scriptFontSize = GreetingsGeometry.scriptFontSize(isLandscape: isLandscape, scale: 1.0)
         let targetHeight: CGFloat = 225  // 1in at 300dpi, printScale = 1.0
-        // Reserve letterEdgeClearance on the far side so even a long word
-        // (whose badge width gets capped/shrunk to fit) leaves that much
-        // room between the badge's own edge and the card edge — combined
-        // with extraHorizontalPad (the letters' own inset from the badge
-        // edge) below, this guarantees the letters themselves never land
-        // closer than letterEdgeClearance to the card's left/right edges.
+        // Cap the badge's own (unrotated) width so that, once centered
+        // (.center) or rotated-and-placed (.left/Tilt, per its own math),
+        // the letters never land closer than cardEdgeClearance to the
+        // card's left/right edges — a long word shrinks its font rather
+        // than overflowing that guarantee.
         let bigWordFontSize = GreetingsGeometry.bigWordFontSize(
-            forLetterHeight: targetHeight, maxBadgeWidth: referenceWidth - letterEdgeClearance, word: overlay.word,
+            forLetterHeight: targetHeight, maxBadgeWidth: referenceWidth - 2 * cardEdgeClearance, word: overlay.word,
             fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize,
             isLandscape: isLandscape, printScale: 1.0)
-        // +75 bleed-margin match — see GreetingsCaptionView's identical fix.
-        let tiltMinWidth: CGFloat = isLandscape ? 2925 : 2000
 
-        // Landscape tilt reads better with the text left-justified a fixed
-        // distance from the widened backgroundMinWidth box's left edge,
-        // rather than centered. Portrait keeps dead-center.
-        let tiltLeadingInset: CGFloat = 160
-
-        // .center/.corner get letterEdgeClearance (1/4in at 300dpi) of
-        // padding per side between the letters and the badge's own edge —
-        // for .corner (flush to the card's left edge, zero inset), this is
-        // the ONLY thing standing between the letters and the card edge, so
-        // it must equal the full clearance, not just widen the badge a bit.
-        // .left/tilt is unaffected: it already sizes itself via
-        // backgroundMinWidth.
-        let extraHorizontalPad: CGFloat = overlay.fixedPosition == .left ? 0 : letterEdgeClearance
+        // letterEdgeClearance (1/4in at 300dpi) of padding per side between
+        // the letters and the badge's own (un-rotated) edge — for Tilt, the
+        // real guarantee against the CARD's edges comes from the rotated-
+        // bounding-box clearance math in GreetingsFixedPosition.center(...)
+        // instead; this is just the letters' inset from their own badge box.
+        let extraHorizontalPad: CGFloat = letterEdgeClearance
 
         // "greetings from" script color — the user's explicit swatch pick,
         // or the current scheme's own default (preset.scriptColor, except
@@ -71,6 +70,13 @@ enum GreetingsBadgeRenderer {
         let schemeDefaultScriptColor: Color = overlay.badgeColorChoice == .cream ? .greetingsBlueDark : preset.scriptColor
         let scriptColorOverride: Color? = overlay.scriptColorChoice?.color ?? schemeDefaultScriptColor
 
+        // Halo's color is fixed per scriptColorChoice (see
+        // GreetingsScriptColor.haloColor), independent of badgeColorChoice —
+        // only shows when the user has explicitly picked one of the 5 script
+        // swatches (there's no defined halo for the unpicked scheme-default
+        // color) AND the Halo toggle is on.
+        let scriptBorderColor: Color = overlay.haloEnabled ? (overlay.scriptColorChoice?.haloColor ?? .clear) : .clear
+
         // Rendered WITHOUT the background rectangle (transparent) — the
         // caller draws that separately, live, so backgroundOpacity can be
         // dragged/animated without invalidating this cached bitmap at all.
@@ -79,9 +85,9 @@ enum GreetingsBadgeRenderer {
             scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0,
             scriptColorOverride: scriptColorOverride,
             drawsBackground: false,
-            backgroundMinWidth: overlay.fixedPosition == .left ? tiltMinWidth : nil,
-            contentLeadingInset: overlay.fixedPosition == .left && isLandscape ? tiltLeadingInset : nil,
-            extraHorizontalPad: extraHorizontalPad)
+            extraHorizontalPad: extraHorizontalPad,
+            isTilt: overlay.fixedPosition == .left,
+            scriptBorderColor: scriptBorderColor)
 
         let renderer = ImageRenderer(content: view)
         renderer.scale = 1

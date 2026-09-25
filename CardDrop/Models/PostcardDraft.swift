@@ -20,6 +20,32 @@ enum PostcardBorder: String {
     case decorative
 }
 
+// Fill color for any part of the canvas the photo doesn't cover (moved/
+// resized to leave a gap) — solid, no opacity control. Same 5 colors, same
+// order, as the Greetings badge background (see GreetingsBadgeColor) —
+// blue/maroon/cream delegate directly to that enum's own color values so
+// the two pickers can never drift apart; white/black are just literal
+// here since GreetingsBadgeColor already defines its own identical ones.
+enum CanvasBackgroundColor: String, CaseIterable, Identifiable, Codable {
+    // Default — lets the back photo layer (see PostcardDraft.rendered(at:))
+    // show through any gap instead of a flat color.
+    case transparent
+    case white, black, blue, maroon, cream
+
+    var id: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .transparent: return .clear
+        case .white:  return .white
+        case .black:  return .black
+        case .blue:   return GreetingsBadgeColor.blue.color
+        case .maroon: return GreetingsBadgeColor.maroon.color
+        case .cream:  return GreetingsBadgeColor.cream.color
+        }
+    }
+}
+
 enum ModerationState {
     case untested   // not yet checked, or content changed since last check
     case passed     // checked and clean — skip re-check until content changes
@@ -42,6 +68,13 @@ class PostcardDraft: ObservableObject {
     @Published var imageOffset: CGSize = .zero
     @Published var filter: PostcardFilter = .none
     @Published var border: PostcardBorder = .fullBleed
+    @Published var canvasBackgroundColor: CanvasBackgroundColor = .transparent
+    // Whether the photo gap above the front layer shows a vertically-
+    // flipped reflection of the front layer's own top edge, or just the
+    // plain independently-scaled back layer with no mirroring. Only really
+    // visible/relevant with a Tilt Greetings badge, which is why its toggle
+    // lives in that edit panel rather than a general Style It control.
+    @Published var photoMirrorEnabled: Bool = true
     @Published var borderText: String = ""
     @Published var borderFontName: String = "Georgia"
     @Published var borderTextColor: Color = .black
@@ -79,7 +112,7 @@ class PostcardDraft: ObservableObject {
     // combo (salutation + closing) and an optional standalone phrase.
     // The *Salutation/Closing/Text fields hold the resolved (placeholder-
     // filled) display text — PostcardBackCanvas reads those directly rather
-    // than re-fetching cardback_greetings/cardback_phrases itself.
+    // than re-fetching zz_cardback_greetings/zz_cardback_phrases itself.
     @Published var greetingId: UUID?
     @Published var greetingSalutation: String = ""
     @Published var greetingClosing: String = ""
@@ -145,6 +178,8 @@ class PostcardDraft: ObservableObject {
         c.imageOffset        = imageOffset
         c.filter             = filter
         c.border             = border
+        c.canvasBackgroundColor = canvasBackgroundColor
+        c.photoMirrorEnabled = photoMirrorEnabled
         c.borderText         = borderText
         c.borderFontName     = borderFontName
         c.borderTextColor    = borderTextColor
@@ -240,21 +275,57 @@ class PostcardDraft: ObservableObject {
             height: scaledHeight
         )
 
+        // Back layer: same photo, floored at "just covers the canvas"
+        // (imageScale never below 1.0 here, even if the front layer is
+        // zoomed out further than that) — zooms in together with the front
+        // layer past that floor. Guarantees every corner of the canvas
+        // always shows real photo content instead of the plain backdrop
+        // color, regardless of how the front layer is panned/zoomed — e.g.
+        // so a tilted Greetings badge's top-left corner is never left
+        // empty. X position is locked to the front layer's own horizontal
+        // pan (moves in unison) so wherever the back layer peeks through,
+        // it's horizontally aligned with the front layer's content — Y
+        // stays fixed/centered regardless of vertical pan, since that's
+        // what guarantees top/bottom coverage under the banner.
+        let backScale = fillScale * max(1.0, imageScale)
+        let backWidth = imageSize.width * backScale
+        let backHeight = imageSize.height * backScale
+        let backDrawRect = CGRect(
+            x: (size.width - backWidth) / 2 + imageOffset.width * size.width,
+            y: (size.height - backHeight) / 2,
+            width: backWidth,
+            height: backHeight
+        )
+
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
             ctx.cgContext.clip(to: CGRect(origin: .zero, size: size))
-            // Fill a backdrop color first — if the drag/zoom leaves the photo
-            // not fully covering `size` (e.g. dragged/positioned such that an
-            // edge is exposed), that gap must render as something solid in
-            // the saved output, not transparent/undefined (JPEG has no
-            // alpha, so an unfilled gap would otherwise composite
-            // unpredictably). Opaque white by default; if a Greetings badge
-            // is present, match its own badge background color instead, so
-            // an exposed gap reads as an intentional matching color rather
-            // than a jarring mismatch against the badge.
-            let backdropColor: UIColor = greetingsOverlays.first.map { UIColor($0.badgeColorChoice.color) } ?? .white
-            backdropColor.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
+            // Back photo layer first (always covers, per backDrawRect above)
+            // — a solid canvasBackgroundColor, when chosen, then paints OVER
+            // it (e.g. to deliberately fill the tilt corner with a flat
+            // color instead of showing the back photo there). Default is
+            // .transparent, leaving the back photo visible as before; if
+            // this is ever an unexpected empty state with no photo at all,
+            // white/black/etc. still guarantee a solid JPEG (no alpha).
+            image.draw(in: backDrawRect)
+            // Mirror layer (user-toggleable — see photoMirrorEnabled): a
+            // vertically-flipped duplicate of the front layer's own
+            // content, reflected around the front layer's own top edge
+            // (drawRect.minY) — continues the photo as a seamless
+            // reflection into the gap above, instead of the back layer's
+            // independently-cropped (different part of the photo) view.
+            // Matches TextOverlayStepView's live-editor mirror layer exactly.
+            if photoMirrorEnabled {
+                ctx.cgContext.saveGState()
+                ctx.cgContext.translateBy(x: 0, y: 2 * drawRect.minY)
+                ctx.cgContext.scaleBy(x: 1, y: -1)
+                image.draw(in: drawRect)
+                ctx.cgContext.restoreGState()
+            }
+            if canvasBackgroundColor != .transparent {
+                UIColor(canvasBackgroundColor.color).setFill()
+                ctx.fill(CGRect(origin: .zero, size: size))
+            }
             image.draw(in: drawRect)
         }
     }

@@ -22,16 +22,26 @@ private var isRunningInSimulator: Bool {
 struct SendOptionsView: View {
     @ObservedObject var draft: PostcardDraft
     let filteredImage: UIImage?
+    // Freshly-baked images handed directly from CreateFlowView's bakeDraftArt(),
+    // when available, instead of this view re-reading the bake's disk output —
+    // the disk write can still be in flight (bakeDraftArt is fire-and-forget)
+    // when this view first appears, which used to show a stale preview.
+    var freshFrontImage: UIImage? = nil
+    var freshBackImage: UIImage? = nil
+    var freshBack6x9Image: UIImage? = nil
     let originalStatus: CardStatus
     let hasDraftSaved: Bool
     var onSaveUnsent: () -> Void
     var onSaveSent: () -> Void
     var onGoToFront: () -> Void
     var onGoToBack: () -> Void
-    var onGoToAddress: () -> Void
     var onFinish: () -> Void
     var onSendToSomeoneElse: () -> Void
     var onEditCard: () -> Void
+    // Mirrors isSubmittingToLOB up to CreateFlowView so its toolbar Close
+    // button can also block dismissal while a postcard order is mid-submit,
+    // not just the Finish button below.
+    var onSubmittingToLOBChanged: (Bool) -> Void = { _ in }
 
     @EnvironmentObject private var authManager: AuthManager
 
@@ -52,6 +62,28 @@ struct SendOptionsView: View {
     @State private var pendingEmailRecipients: [RecipientContact] = []
     @State private var showMessageRecipients = false
     @State private var pendingMessageRecipients: [RecipientContact] = []
+    @State private var showMailPostcardFlow = false
+    @State private var showVerifyEmailForMail = false
+    // True only when showCreateAccount was opened FROM the "Mail Real
+    // Postcard" row (not the free-send-quota prompt) — lets its onSuccess
+    // chain straight into OTP verification instead of just returning to
+    // Send Options, so the user isn't asked to tap "Mail Real Postcard"
+    // a second time after creating their account.
+    @State private var pendingMailAfterAccountCreation = false
+    @State private var showPostcardPayment = false
+    @State private var pendingMailSender: SavedMailingAddress?
+    @State private var pendingMailRecipient: SavedMailingAddress?
+    @State private var pendingMailPrice: PostcardPriceOption?
+    @State private var postcardOrderConfirmed = false
+    @State private var isSubmittingToLOB = false
+    @State private var showLOBSubmissionError = false
+    @State private var lobSubmissionErrorMessage: String?
+
+    #if DEBUG
+    @State private var isRunningLOBTest = false
+    @State private var lobTestMessage: String? = nil
+    @State private var showLOBTestAlert = false
+    #endif
 
     private struct LimitPrompt: Identifiable {
         let id = UUID()
@@ -212,10 +244,30 @@ struct SendOptionsView: View {
             } message: {
                 Text(sendError ?? "Something went wrong. Please try again.")
             }
+            #if DEBUG
+            .alert("LOB Test Export", isPresented: $showLOBTestAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(lobTestMessage ?? "")
+            }
+            #endif
         .onAppear {
-            teaserImage       = draftManager.loadFront(for: draft.cardID)
-            backRenderImage   = draftManager.loadBack(for: draft.cardID)
-            back6x9RenderImage = draftManager.loadBack6x9(for: draft.cardID)
+            teaserImage       = freshFrontImage  ?? draftManager.loadFront(for: draft.cardID)
+            backRenderImage   = freshBackImage   ?? draftManager.loadBack(for: draft.cardID)
+            back6x9RenderImage = freshBack6x9Image ?? draftManager.loadBack6x9(for: draft.cardID)
+        }
+        // bakeDraftArt() is fire-and-forget, so its render can still be
+        // running when this view first appears (see freshBackImage doc
+        // comment above) — pick up the result once it lands instead of
+        // staying on whatever onAppear read (stale disk file, or nil).
+        .onChange(of: freshFrontImage) { _, newImage in
+            if let newImage { teaserImage = newImage }
+        }
+        .onChange(of: freshBackImage) { _, newImage in
+            if let newImage { backRenderImage = newImage }
+        }
+        .onChange(of: freshBack6x9Image) { _, newImage in
+            if let newImage { back6x9RenderImage = newImage }
         }
         .onChange(of: filteredImage) { _, newImage in
             guard newImage != nil else { return }
@@ -230,7 +282,6 @@ struct SendOptionsView: View {
         .sheet(isPresented: $showMailComposer) {
             if let result = cardSendResult {
                 MailComposeView(
-                    compositeImageURL: result.compositeImageURL,
                     cardURL: result.cardURL,
                     recipientEmails: pendingEmailRecipients.map(\.value),
                     cardID: result.cardID,
@@ -286,6 +337,55 @@ struct SendOptionsView: View {
                 authManager.setTierUnlimited()
             }
         }
+        .sheet(isPresented: $showVerifyEmailForMail) {
+            OTPVerificationView(
+                onSuccess: {
+                    showVerifyEmailForMail = false
+                    showMailPostcardFlow = true
+                },
+                onCancel: { showVerifyEmailForMail = false }
+            )
+            .environmentObject(authManager)
+            .environmentObject(draftManager)
+            .environmentObject(addressBook)
+        }
+        .sheet(isPresented: $showMailPostcardFlow) {
+            PostcardAddressStepView { sender, recipient, price in
+                pendingMailSender = sender
+                pendingMailRecipient = recipient
+                pendingMailPrice = price
+                showMailPostcardFlow = false
+                showPostcardPayment = true
+            }
+        }
+        .sheet(isPresented: $showPostcardPayment) {
+            if let pendingMailSender, let pendingMailRecipient, let pendingMailPrice {
+                PostcardPaymentSheet(
+                    cardID: draft.cardID,
+                    sender: pendingMailSender,
+                    recipient: pendingMailRecipient,
+                    price: pendingMailPrice
+                ) { success, orderID in
+                    showPostcardPayment = false
+                    if success, let orderID {
+                        Task { await submitPostcardOrder(orderID: orderID, size: pendingMailPrice.size) }
+                    }
+                }
+            }
+        }
+        .alert("Postcard Ordered", isPresented: $postcardOrderConfirmed) {
+            // Just dismiss the alert — stay on Send Options so the user can
+            // send to another recipient (digitally or by mail) before
+            // choosing to tap Finish themselves.
+            Button("OK") {}
+        } message: {
+            Text("Your postcard is on its way to being printed and mailed.")
+        }
+        .alert("Postcard Not Sent", isPresented: $showLOBSubmissionError, presenting: lobSubmissionErrorMessage) { _ in
+            Button("OK") {}
+        } message: { message in
+            Text(message)
+        }
         } // end GeometryReader
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
@@ -305,13 +405,28 @@ struct SendOptionsView: View {
                             title: "Mail Real Postcard",
                             subtitle: "Create Account to Mail Real Postcards",
                             color: .brandBlue
-                        ) { showCreateAccount = true }
+                        ) {
+                            pendingMailAfterAccountCreation = true
+                            showCreateAccount = true
+                        }
+                    } else if !authManager.isEmailVerified {
+                        // Physical mail involves real payment and a real mailing
+                        // address — unlike digital sends, which allow a small
+                        // free quota before verification is required, this one
+                        // is gated up front, every time.
+                        sendRow(
+                            icon: "photo",
+                            title: "Mail Real Postcard",
+                            subtitle: "Verify Your Email to Mail Real Postcards",
+                            color: .brandBlue
+                        ) { showVerifyEmailForMail = true }
                     } else {
-                        // Account exists, so "Create Account" no longer applies —
-                        // Mail Real Postcard becomes reachable in principle, but
-                        // isn't wired to anything yet.
-                        comingSoonRow(icon: "photo", title: "Mail Real Postcard",
-                                      subtitle: "Printed & mailed for you")
+                        sendRow(
+                            icon: "photo",
+                            title: "Mail Real Postcard",
+                            subtitle: "Printed & mailed for you",
+                            color: .brandBlue
+                        ) { showMailPostcardFlow = true }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -319,6 +434,24 @@ struct SendOptionsView: View {
                 .cornerRadius(16)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 6)
+
+                #if DEBUG
+                VStack(spacing: 0) {
+                    sendRow(icon: "hammer", title: "Test LOB Export (4x6)",
+                            subtitle: isRunningLOBTest ? "Rendering + uploading…" : "Debug only — not a real send",
+                            color: .orange) { runLOBTest(size: .fourBySix) }
+                    Divider().padding(.leading, 66)
+                    sendRow(icon: "hammer", title: "Test LOB Export (6x9)",
+                            subtitle: isRunningLOBTest ? "Rendering + uploading…" : "Debug only — not a real send",
+                            color: .orange) { runLOBTest(size: .sixByNine) }
+                }
+                .disabled(isRunningLOBTest)
+                .padding(.horizontal, 16)
+                .background(Color(uiColor: .secondarySystemGroupedBackground))
+                .cornerRadius(16)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+                #endif
 
                 // Send Digitally — anchored directly above Finish rather than
                 // scrolling with the rest of the List.
@@ -364,16 +497,28 @@ struct SendOptionsView: View {
                     .padding(.horizontal, 16)
                 }
 
-                // Finish button
+                // Finish button — disabled while a postcard order is still being
+                // submitted to LOB, so the user can't dismiss (and lose track of
+                // whether it worked) before that result comes back.
                 Button(action: handleFinish) {
-                    Text("Finish")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.brandBlue)
-                        .foregroundColor(.white)
-                        .cornerRadius(999)
+                    if isSubmittingToLOB {
+                        ProgressView()
+                            .tint(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.brandBlue.opacity(0.5))
+                            .cornerRadius(999)
+                    } else {
+                        Text("Finish")
+                            .font(.system(size: 17, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.brandBlue)
+                            .foregroundColor(.white)
+                            .cornerRadius(999)
+                    }
                 }
+                .disabled(isSubmittingToLOB)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 8)
@@ -393,7 +538,10 @@ struct SendOptionsView: View {
                 title: Text(""),
                 message: Text(prompt.title + "\n" + prompt.message),
                 primaryButton: .default(Text("Yes")) {
-                    if prompt.isAnonymous { showCreateAccount = true }
+                    if prompt.isAnonymous {
+                        pendingMailAfterAccountCreation = false
+                        showCreateAccount = true
+                    }
                     else { showVerifyEmail = true }
                 },
                 secondaryButton: .cancel(Text("No")) {
@@ -402,7 +550,13 @@ struct SendOptionsView: View {
             )
         }
         .sheet(isPresented: $showCreateAccount) {
-            SubscribeGateView(onSuccess: { showCreateAccount = false })
+            SubscribeGateView(onSuccess: {
+                showCreateAccount = false
+                if pendingMailAfterAccountCreation {
+                    pendingMailAfterAccountCreation = false
+                    showVerifyEmailForMail = true
+                }
+            })
                 .environmentObject(authManager)
                 .environmentObject(draftManager)
                 .environmentObject(addressBook)
@@ -413,6 +567,28 @@ struct SendOptionsView: View {
                 .environmentObject(draftManager)
                 .environmentObject(addressBook)
         }
+        .overlay {
+            // Blocking, non-dismissible — same window the Finish/Close
+            // buttons are disabled for (see onSubmittingToLOBChanged).
+            if isSubmittingToLOB {
+                ZStack {
+                    Color.black.opacity(0.35).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .scaleEffect(1.2)
+                        Text("Submitting your postcard order…")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundColor(.primary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(24)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal, 48)
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isSubmittingToLOB)
     }
 
     private func handleFinish() {
@@ -459,29 +635,6 @@ struct SendOptionsView: View {
         }
     }
 
-    @ViewBuilder
-    private func comingSoonRow(icon: String, title: String, subtitle: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(.secondary.opacity(0.4))
-                .frame(width: 36)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .lineLimit(1)
-                    .foregroundColor(.primary.opacity(0.4))
-                Text(subtitle)
-                    .lineLimit(1)
-                    .font(.caption)
-                    .foregroundColor(.secondary.opacity(0.4))
-            }
-            Spacer()
-            Text("Coming soon")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-        }
-        .padding(.vertical, 10)
-    }
 
     // MARK: - Render + share
 
@@ -584,6 +737,42 @@ struct SendOptionsView: View {
         }
     }
 
+    // Mirrors insertEmailRecipients/insertMessageRecipients — without this,
+    // a physical order's recipient never lands in card_recipients, so Send
+    // History (which reads that table, see CardRecipientService) shows
+    // nothing even though the card was successfully mailed.
+    // CardRecipientRecord.modeLabel/modeIcon already special-case
+    // send_method == "postcard" ("Mailed Postcard") — nothing wrote that
+    // value until now.
+    private func insertPostcardRecipient(_ recipient: SavedMailingAddress) async {
+        struct Row: Encodable {
+            let card_id: String
+            let first_name: String?
+            let last_name: String?
+            let street: String?
+            let city: String?
+            let state: String?
+            let zip: String?
+            let country: String?
+            let send_method: String
+        }
+        let row = Row(
+            card_id: draft.cardID.uuidString,
+            first_name: recipient.firstName,
+            last_name: recipient.lastName,
+            street: recipient.street,
+            city: recipient.city,
+            state: recipient.state,
+            zip: recipient.zip,
+            country: recipient.country,
+            send_method: "postcard"
+        )
+        try? await supabase
+            .from("card_recipients")
+            .insert(row)
+            .execute()
+    }
+
     private func sendText() {
         guard !isSending else { return }
         guard draft.image != nil else { showMissingPhotoAlert = true; return }
@@ -656,6 +845,110 @@ struct SendOptionsView: View {
         }
     }
 
+    // Runs after a physical-mail order's payment is confirmed 'paid':
+    // renders the size-correct front/back pair (rendering only happens
+    // on-device, so this can't be done in the submit-to-lob edge function),
+    // uploads it, then hands the resulting URLs to submit-to-lob. The order
+    // itself already reached 'paid' before this runs, so a failure here
+    // doesn't lose the payment — it just leaves the order retriable later
+    // (see the planned pending-order reconciliation job).
+    private func submitPostcardOrder(orderID: String, size: PostcardSize) async {
+        isSubmittingToLOB = true
+        onSubmittingToLOBChanged(true)
+        defer {
+            isSubmittingToLOB = false
+            onSubmittingToLOBChanged(false)
+        }
+
+        let sizeLabel = size == .fourBySix ? "4x6" : "6x9"
+        do {
+            // A card's content is immutable once created, so if this exact
+            // cardID+size was already rendered/uploaded (e.g. ordering a
+            // second physical copy of the same design), reuse it rather
+            // than redundantly re-rendering and overwriting it.
+            let urls: (frontURL: URL, backURL: URL)
+            if let existing = try await CardUploadService.existingLOBExportURLs(cardID: draft.cardID, sizeLabel: sizeLabel) {
+                urls = existing
+            } else {
+                let lobSize: CardRenderer.LOBPostcardSize = size == .fourBySix ? .fourBySix : .sixByNine
+                guard let export = CardRenderer.renderLOBTestExport(draft: draft, filteredImage: filteredImage, size: lobSize),
+                      let frontData = export.front.jpegData(compressionQuality: 0.88),
+                      let backData = export.back.jpegData(compressionQuality: 0.88) else {
+                    lobSubmissionErrorMessage = "Sorry, we could not mail your postcard - your credit card was not charged. Please try again, or contact support if this keeps happening."
+                    showLOBSubmissionError = true
+                    return
+                }
+                urls = try await CardUploadService.uploadLOBTestExport(
+                    cardID: draft.cardID, frontData: frontData, backData: backData, sizeLabel: sizeLabel
+                )
+            }
+            // The physical postcard's back-of-card QR links to /card/{cardID}
+            // on the webapp, which reads card-images/{senderID}/{cardID}.jpg
+            // and _back.jpg — the DIGITAL-resolution images, not the LOB
+            // print export above. A card mailed without ever being sent
+            // digitally first has never had these uploaded, so that link
+            // 404s unless we upload them here too. Idempotent (upsert), so
+            // safe to run even when the LOB export itself was reused above.
+            if let frontData = draftManager.loadFrontData(for: draft.cardID),
+               let backData = draftManager.loadBackData(for: draft.cardID) {
+                let back6x9Data = draftManager.loadBack6x9Data(for: draft.cardID)
+                try await CardUploadService.uploadDigitalCardImages(
+                    cardID: draft.cardID, frontData: frontData, backData: backData, back6x9Data: back6x9Data
+                )
+            }
+            _ = try await PostcardOrderService.submitToLOB(
+                orderID: orderID, frontImageURL: urls.frontURL, backImageURL: urls.backURL
+            )
+            if let recipient = pendingMailRecipient {
+                await insertPostcardRecipient(recipient)
+            }
+            // Mirrors the digital-send paths (onSaveSent then onFinish) —
+            // onFinish is deferred to the alert's OK button below so the
+            // user sees the confirmation before the flow dismisses.
+            // hasSent must also flip here: handleFinish() (Finish button)
+            // calls onSaveUnsent() whenever !hasSent, and hasSent was
+            // previously only ever set true by the digital-send paths —
+            // without this, tapping Finish after a physical-only send
+            // immediately flipped the draft right back to .unsent.
+            hasSent = true
+            onSaveSent()
+            postcardOrderConfirmed = true
+        } catch {
+            let genericMessage = "Sorry, we could not mail your postcard - your credit card was not charged. Please try again, or contact support if this keeps happening."
+            lobSubmissionErrorMessage = "\(genericMessage)\n\n\(error.localizedDescription)"
+            showLOBSubmissionError = true
+        }
+    }
+
+    #if DEBUG
+    // Debug-only: renders + uploads a fresh LOB-shaped front/back pair on
+    // demand for manual testing against LOB's dashboard/API. Not part of the
+    // regular send flow — nothing here is cached or reused by a real send.
+    private func runLOBTest(size: CardRenderer.LOBPostcardSize) {
+        isRunningLOBTest = true
+        Task { @MainActor in
+            defer { isRunningLOBTest = false }
+            guard let export = CardRenderer.renderLOBTestExport(draft: draft, filteredImage: filteredImage, size: size),
+                  let frontData = export.front.jpegData(compressionQuality: 0.88),
+                  let backData = export.back.jpegData(compressionQuality: 0.88) else {
+                lobTestMessage = "Render failed."
+                showLOBTestAlert = true
+                return
+            }
+            let sizeLabel = size == .fourBySix ? "4x6" : "6x9"
+            do {
+                let urls = try await CardUploadService.uploadLOBTestExport(
+                    cardID: draft.cardID, frontData: frontData, backData: backData, sizeLabel: sizeLabel
+                )
+                lobTestMessage = "Uploaded \(sizeLabel):\nFront: \(urls.frontURL.absoluteString)\nBack: \(urls.backURL.absoluteString)"
+            } catch {
+                lobTestMessage = "Upload failed: \(error.localizedDescription)"
+            }
+            showLOBTestAlert = true
+        }
+    }
+    #endif
+
     private func uploadAndSend(then show: @escaping () -> Void) async {
         // Sent card re-opened: files already in Supabase, skip upload and go straight to composer
         if cardSendResult != nil {
@@ -667,15 +960,8 @@ struct SendOptionsView: View {
         guard let frontData = draftManager.loadFrontData(for: draft.cardID),
               let backData  = draftManager.loadBackData(for: draft.cardID) else { return }
         let back6x9Data = draftManager.loadBack6x9Data(for: draft.cardID)
-        let backForLOBData = draftManager.loadBackForLOBData(for: draft.cardID)
-        let back6x9ForLOBData = draftManager.loadBack6x9ForLOBData(for: draft.cardID)
 
         teaserImage = draftManager.loadFront(for: draft.cardID)
-
-        // Plain card front, uploaded here so email can reference it by URL
-        // — an embedded cid: attachment doesn't render reliably across mail
-        // clients (confirmed broken in Gmail).
-        let compositeData: Data? = frontData
 
         // Upload + call Edge Function
         isSending = true
@@ -688,9 +974,6 @@ struct SendOptionsView: View {
                 frontData: frontData,
                 backData: backData,
                 back6x9Data: back6x9Data,
-                backForLOBData: backForLOBData,
-                back6x9ForLOBData: back6x9ForLOBData,
-                compositeData: compositeData,
                 frontIsPortrait: draft.orientation == .portrait,
                 frontInkMessage: frontInk,
                 backInkMessage: backInk,
@@ -724,7 +1007,6 @@ struct SendOptionsView: View {
 // MARK: - Mail composer bridge
 
 struct MailComposeView: UIViewControllerRepresentable {
-    var compositeImageURL: URL?
     var cardURL: URL
     var recipientEmails: [String]
     var cardID: UUID
@@ -740,23 +1022,10 @@ struct MailComposeView: UIViewControllerRepresentable {
         let from = senderNickname?.isEmpty == false ? senderNickname! : "You"
         vc.setSubject("\(from) sent a CardDrop")
 
-        // Hosted image (uploaded alongside front/back at send time — see
-        // CardUploadService.send's compositeData param), not an embedded
-        // cid: attachment: cid: references don't render reliably across
-        // mail clients (confirmed broken in Gmail), whereas a plain hosted
-        // <img src> works everywhere, same as the front/back teaser images.
         let url = cardURL.absoluteString
-        let imageTag = compositeImageURL.map {
-            """
-            <a href="\(url)" style="display:block;text-decoration:none;">
-              <img src="\($0.absoluteString)" style="max-width:100%;border-radius:10px;display:block;margin:0 auto 20px;" />
-            </a>
-            """
-        } ?? ""
         let html = """
         <html>
         <body style="font-family:-apple-system,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#222;text-align:center;">
-        \(imageTag)
         <p style="font-size:15px;margin:0 0 12px;">Tap to open it</p>
         <p style="font-size:14px;margin:0;"><a href="\(url)" style="color:#0066FF;">\(url)</a></p>
         </body>
@@ -847,73 +1116,6 @@ struct ActivitySheet: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ uvc: UIActivityViewController, context: Context) {}
 }
-
-// MARK: - Card Checklist
-
-struct CardChecklistView: View {
-    @ObservedObject var draft: PostcardDraft
-
-    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            checklistSection("Required") {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
-                    checklistRow("Photo", filled: draft.image != nil, style: .required)
-                    checklistRow("Message", filled: !draft.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, style: .required)
-                }
-            }
-            checklistSection("For Mailing") {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
-                    checklistRow("To Address", filled: !draft.recipientStreet.isEmpty, style: .mailing)
-                    checklistRow("From Address", filled: !draft.senderStreet.isEmpty, style: .mailing)
-                }
-            }
-            checklistSection("Optional") {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 4) {
-                    checklistRow("To Email", filled: !draft.recipientEmail.isEmpty, style: .optional)
-                    checklistRow("From Email", filled: !draft.senderEmail.isEmpty, style: .optional)
-                    checklistRow("To Phone", filled: !draft.recipientPhone.isEmpty, style: .optional)
-                    checklistRow("From Phone", filled: !draft.senderPhone.isEmpty, style: .optional)
-                }
-            }
-        }
-    }
-
-    private enum RowStyle { case required, mailing, optional }
-
-    @ViewBuilder
-    private func checklistSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.secondary)
-                .textCase(.uppercase)
-                .padding(.top, 14)
-                .padding(.bottom, 4)
-            content()
-        }
-    }
-
-    @ViewBuilder
-    private func checklistRow(_ label: String, filled: Bool, style: RowStyle) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: filled ? "checkmark.circle.fill" : "circle")
-                .foregroundColor(
-                    filled ? .green :
-                    style == .required ? .red :
-                    style == .mailing ? Color.brandBlue :
-                    .secondary
-                )
-                .font(.system(size: 15))
-            Text(label)
-                .font(.footnote)
-                .foregroundColor(style == .optional ? .secondary : .primary)
-        }
-        .padding(.vertical, 2)
-    }
-}
-
 
 // MARK: - Custom Text Border
 
@@ -1301,7 +1503,7 @@ struct MessageRecipientsSheet: View {
 #Preview {
     SendOptionsView(
         draft: PostcardDraft(), filteredImage: nil, originalStatus: .unsent, hasDraftSaved: false,
-        onSaveUnsent: {}, onSaveSent: {}, onGoToFront: {}, onGoToBack: {}, onGoToAddress: {}, onFinish: {},
+        onSaveUnsent: {}, onSaveSent: {}, onGoToFront: {}, onGoToBack: {}, onFinish: {},
         onSendToSomeoneElse: {}, onEditCard: {}
     )
 }

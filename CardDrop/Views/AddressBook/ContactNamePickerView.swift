@@ -29,10 +29,15 @@ struct PickedContactInfo {
 /// with the exact keys needed.
 struct ContactNamePickerView: UIViewControllerRepresentable {
     var onSelect: (PickedContactInfo) -> Void
+    /// When set, contacts not matching are disabled (grayed out, not hidden —
+    /// CNContactPickerViewController has no full-hide filter). Used to steer
+    /// users toward contacts that actually have a postal address on file.
+    var enablingPredicate: NSPredicate? = nil
 
     func makeUIViewController(context: Context) -> CNContactPickerViewController {
         let picker = CNContactPickerViewController()
         picker.delegate = context.coordinator
+        picker.predicateForEnablingContact = enablingPredicate
         return picker
     }
 
@@ -89,7 +94,11 @@ struct ContactNamePickerView: UIViewControllerRepresentable {
                 city: postal?.city ?? "",
                 state: postal?.state ?? "",
                 zip: postal?.postalCode ?? "",
-                country: postal?.country ?? "",
+                // isoCountryCode (e.g. "us"), not the localized display name
+                // (e.g. "United States") — LOB's Postcards API requires a
+                // real ISO-3166 alpha-2 code, and this is what CNPostalAddress
+                // actually stores it as internally.
+                country: postal?.isoCountryCode.uppercased() ?? "",
                 email: email,
                 phone: phone
             ))

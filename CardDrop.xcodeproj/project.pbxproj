@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1F0D33883061FA9F00C5FD56 /* StripeApplePay in Frameworks */ = {isa = PBXBuildFile; productRef = 1F0D33873061FA9F00C5FD56 /* StripeApplePay */; };
+		1F0D338A3061FA9F00C5FD56 /* StripePaymentSheet in Frameworks */ = {isa = PBXBuildFile; productRef = 1F0D33893061FA9F00C5FD56 /* StripePaymentSheet */; };
 		1F8A99B22F7CA10900FF2E4F /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 1F8A99B12F7CA10900FF2E4F /* Supabase */; };
 /* End PBXBuildFile section */
 
@@ -41,6 +43,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				1F8A99B22F7CA10900FF2E4F /* Supabase in Frameworks */,
+				1F0D338A3061FA9F00C5FD56 /* StripePaymentSheet in Frameworks */,
+				1F0D33883061FA9F00C5FD56 /* StripeApplePay in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -92,6 +96,8 @@
 			name = CardDrop;
 			packageProductDependencies = (
 				1F8A99B12F7CA10900FF2E4F /* Supabase */,
+				1F0D33873061FA9F00C5FD56 /* StripeApplePay */,
+				1F0D33893061FA9F00C5FD56 /* StripePaymentSheet */,
 			);
 			productName = "Picture Postcard";
 			productReference = 1F88BC1B2F7C708800671BA2 /* CardDrop.app */;
@@ -123,6 +129,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1F8A99A72F7C9EAD00FF2E4F /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				1F0D33863061FA9F00C5FD56 /* XCRemoteSwiftPackageReference "stripe-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1F88BC1C2F7C708800671BA2 /* Products */;
@@ -281,6 +288,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = CardDrop/CardDrop.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7VPQM9Q6TD;
@@ -320,6 +328,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = CardDrop/CardDrop.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7VPQM9Q6TD;
@@ -378,6 +387,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		1F0D33863061FA9F00C5FD56 /* XCRemoteSwiftPackageReference "stripe-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stripe/stripe-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 26.11.0;
+			};
+		};
 		1F8A99A72F7C9EAD00FF2E4F /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/supabase/supabase-swift";
@@ -389,6 +406,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		1F0D33873061FA9F00C5FD56 /* StripeApplePay */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1F0D33863061FA9F00C5FD56 /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripeApplePay;
+		};
+		1F0D33893061FA9F00C5FD56 /* StripePaymentSheet */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1F0D33863061FA9F00C5FD56 /* XCRemoteSwiftPackageReference "stripe-ios" */;
+			productName = StripePaymentSheet;
+		};
 		1F8A99B12F7CA10900FF2E4F /* Supabase */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 1F8A99A72F7C9EAD00FF2E4F /* XCRemoteSwiftPackageReference "supabase-swift" */;

@@ -1,6 +1,7 @@
 import SwiftUI
 import Supabase
 import CoreText
+import StripePaymentSheet
 
 @main
 struct CardDropApp: App {
@@ -13,6 +14,7 @@ struct CardDropApp: App {
     init() {
         registerCustomFonts()
         clearKeychainOnFreshInstall()
+        StripeAPI.defaultPublishableKey = StripeConfig.publishableKey
     }
 
     var body: some Scene {
@@ -88,7 +90,7 @@ private func clearKeychainOnFreshInstall() {
 // Typical Xcode bundle paths: root of bundle, or inside "fonts" or "Assets/fonts" subfolder.
 
 private func registerCustomFonts() {
-    let names = ["Bangers-Regular", "Creepster-Regular", "DancingScript-VariableFont_wght", "BowlbyOneSC-Regular"]
+    let names = ["Bangers-Regular", "Creepster-Regular", "DancingScript-VariableFont_wght", "BowlbyOneSC-Regular", "SpecialElite-Regular", "CourierPrime-Regular"]
     let subdirs: [String?] = [nil, "fonts", "Assets/fonts"]
     for name in names {
         for subdir in subdirs {

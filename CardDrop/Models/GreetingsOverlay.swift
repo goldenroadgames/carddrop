@@ -84,19 +84,20 @@ struct GreetingsPreset: Identifiable {
 
 enum GreetingsFixedPosition: String, CaseIterable {
     case center   // horizontal center, inset 20px from top, no rotation
-    case left     // top-left corner, tilted -12°, so the badge's top-right and
-                  // bottom-left corners each sit 20px from the top/left edges
-    case corner   // top-left corner, inset 20px top/left, no rotation
+    case left     // tilted, hugging the top-left while guaranteeing 0.5in
+                  // clearance from the card's left/right edges — see center(...)
 
     var displayName: String {
         switch self {
         case .center: return "Center"
-        case .corner: return "Corner"
         case .left:   return "Tilt"
         }
     }
 
-    var rotationDegrees: Double { self == .left ? -8 : 0 }
+    func rotationDegrees(isLandscape: Bool) -> Double {
+        guard self == .left else { return 0 }
+        return -8
+    }
 
     /// Center point to feed `.position()`, given the badge's own (pre-scale,
     /// pre-rotation) estimated size and the canvas it's rendered into.
@@ -110,31 +111,97 @@ enum GreetingsFixedPosition: String, CaseIterable {
         let isLandscape = canvasSize.width >= canvasSize.height
         let referenceWidth: CGFloat = isLandscape ? 2775 : 1875
         let insetScale = canvasSize.width / referenceWidth
-        let inset: CGFloat = 20 * insetScale
         let w = badgeSize.width, h = badgeSize.height
         switch self {
-        case .corner:
-            // Fully bled to the top-left edge — no inset.
-            return CGPoint(x: w / 2, y: h / 2)
         case .center:
             // Fully bled to the top edge — no inset. Still horizontally centered.
             return CGPoint(x: canvasSize.width / 2, y: h / 2)
         case .left:
-            let theta = rotationDegrees * .pi / 180
+            let theta = rotationDegrees(isLandscape: isLandscape) * .pi / 180
             let cosT = CGFloat(cos(theta)), sinT = CGFloat(sin(theta))
-            // Solve for the center such that the rotated top-right corner
-            // sits at y = inset and the rotated bottom-left corner sits at
-            // x = inset (two constraints, two unknowns).
-            let cx = inset + (w / 2) * cosT + (h / 2) * sinT
-            let cy = inset - (w / 2) * sinT + (h / 2) * cosT
-            // Nudge up/left from that solved position (print scale).
-            let nudgeUp: CGFloat = 150 * insetScale
-            let nudgeLeft: CGFloat = 50 * insetScale
-            // Landscape only: lift another 1/2in (150px at 300dpi print
-            // scale) on top of the nudge above.
-            let landscapeExtraNudgeUp: CGFloat = isLandscape ? 150 * insetScale : 0
-            return CGPoint(x: cx - nudgeLeft, y: cy - nudgeUp - landscapeExtraNudgeUp)
+            // Axis-aligned bounding box of the WxH badge once rotated by
+            // theta about its own center — this is the real footprint we
+            // need to keep clear of the card's left/right edges.
+            let halfBBoxW = (abs(w * cosT) + abs(h * sinT)) / 2
+            let halfBBoxH = (abs(w * sinT) + abs(h * cosT)) / 2
+            // Guaranteed minimum clearance from the left/right edges — 0.5in
+            // at 300dpi print scale (vs. letterEdgeClearance's 0.25in, which
+            // only governs the un-rotated .center badge and the letters'
+            // inset from their OWN badge edge, not the card edge).
+            let clearance: CGFloat = 150 * insetScale
+            let minCx = clearance + halfBBoxW
+            let maxCx = canvasSize.width - clearance - halfBBoxW
+            // Hug the left side of the valid range (preserves the original
+            // "near the top-left corner" look) — but if the rotated badge is
+            // too wide for both clearances to hold at once (an unusually
+            // long word), fall back to dead-center rather than violating
+            // either edge.
+            let cx = minCx <= maxCx ? minCx : canvasSize.width / 2
+            // Vertical placement: fixed so the ribbon's own visible TOP EDGE
+            // (not its centerline) crosses the card's LEFT edge (x=0) at
+            // exactly this many pixels down from the top, REGARDLESS of
+            // word length/badge size — solved exactly from the top edge's
+            // own parametric line equation (offset from the centerline by
+            // h/2 in the rotated frame), so plugging any cx/h back in still
+            // satisfies the crossing constraint exactly. Deliberately no
+            // safety clamp here (an earlier max(halfBBoxH, ...) floor was
+            // overriding this for wider badges, breaking the fixed-crossing
+            // guarantee for longer words) — a sufficiently tall badge could
+            // in principle extend above the canvas top, but a fixed,
+            // word-length-independent crossing point is the explicit
+            // requirement here.
+            let leftEdgeCrossingY: CGFloat = 150 * insetScale  // 0.5in at 300dpi print scale
+            let cy = leftEdgeCrossingY + cx * tan(theta) + (h / 2) / cos(theta)
+            return CGPoint(x: cx, y: cy)
         }
+    }
+}
+
+// MARK: - Greetings Safe Zone  (photo gesture-clamp boundary)
+
+extension GreetingsOverlay {
+    /// Bottom edge of the (first) badge's rendered footprint — rotated
+    /// bounding box for Tilt, plain badge height for Center — as a fraction
+    /// of canvas height (0 = top edge, 1 = bottom edge). Used to define the
+    /// "safe zone" below which the front photo layer must always fully
+    /// cover, regardless of zoom/pan, so an unintentional design error
+    /// (photo zoomed out enough to leave a gap not hidden behind the
+    /// banner) can't happen. Uses the same cheap estimate (not a real
+    /// re-render) the live editor's own initial-placement fallback uses —
+    /// good enough for a gesture-clamp boundary, doesn't need pixel-exact
+    /// precision. Returns 0 (no safe zone) when there's no Greetings badge.
+    static func safeZoneTopFraction(for overlays: [GreetingsOverlay], isLandscape: Bool) -> CGFloat {
+        guard let overlay = overlays.first else { return 0 }
+        let referenceWidth: CGFloat = isLandscape ? 2775 : 1875
+        let referenceHeight: CGFloat = isLandscape ? 1875 : 2775
+        let scriptFontSize = GreetingsGeometry.scriptFontSize(isLandscape: isLandscape, scale: 1.0)
+        let bigWordFontSize = GreetingsGeometry.bigWordFontSize(
+            forLetterHeight: 225, maxBadgeWidth: referenceWidth - 2 * GreetingsBadgeRenderer.cardEdgeClearance,
+            word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize,
+            isLandscape: isLandscape, printScale: 1.0)
+        let geometry = GreetingsGeometry(
+            word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize,
+            scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0,
+            isTilt: overlay.fixedPosition == .left)
+        let badgeSize = geometry.estimatedBadgeSize()
+        let canvasSize = CGSize(width: referenceWidth, height: referenceHeight)
+        let center = overlay.fixedPosition.center(badgeSize: badgeSize, canvasSize: canvasSize)
+
+        let bottomY: CGFloat
+        if overlay.fixedPosition == .left {
+            // Use the bottom-RIGHT corner's actual (rotated) Y specifically
+            // — not the overall lowest point of the rotated bounding box
+            // (which is the bottom-left corner, given this rotation
+            // direction, and sits lower/stricter than necessary).
+            let theta = overlay.fixedPosition.rotationDegrees(isLandscape: isLandscape) * .pi / 180
+            let localX = badgeSize.width / 2
+            let localY = badgeSize.height / 2
+            let rotatedY = localX * sin(theta) + localY * cos(theta)
+            bottomY = center.y + rotatedY
+        } else {
+            bottomY = center.y + badgeSize.height / 2
+        }
+        return min(1, max(0, bottomY / referenceHeight))
     }
 }
 
@@ -143,15 +210,21 @@ enum GreetingsFixedPosition: String, CaseIterable {
 // background-opacity slider)
 
 enum GreetingsBadgeColor: String, CaseIterable, Identifiable {
-    case blue, maroon, cream
+    // .transparent listed first, then the same order as CanvasBackgroundColor's
+    // swatches. GreetingsOverlay.badgeColorChoice's own default stays .blue —
+    // adding this option here doesn't change what a new badge starts as.
+    case transparent, white, black, blue, maroon, cream
 
     var id: String { rawValue }
 
     var color: Color {
         switch self {
+        case .transparent: return .clear
         case .blue:   return .brandBlue
         case .maroon: return Color(red: 0.85, green: 0.24, blue: 0.24)
         case .cream:  return Color(red: 0.85, green: 0.65, blue: 0.20)
+        case .black:  return .black
+        case .white:  return .white
         }
     }
 }
@@ -161,17 +234,31 @@ enum GreetingsBadgeColor: String, CaseIterable, Identifiable {
 // the word input)
 
 enum GreetingsScriptColor: String, CaseIterable, Identifiable {
-    case yellow, black, blue, red, white
+    case yellow, white, black, red, blue
 
     var id: String { rawValue }
 
     var color: Color {
         switch self {
         case .yellow: return .greetingsScriptYellow
-        case .black:  return .black
-        case .blue:   return .greetingsBlueDark
-        case .red:    return .greetingsRed
         case .white:  return .white
+        case .black:  return .black
+        case .red:    return .greetingsRed
+        // Same blue as the badge background's .blue choice — not the
+        // separate, darker greetingsBlueDark.
+        case .blue:   return .brandBlue
+        }
+    }
+
+    // Fixed halo color for this script color — not user-choosable, only
+    // on/off via GreetingsOverlay.haloEnabled.
+    var haloColor: Color {
+        switch self {
+        case .yellow: return .black
+        case .white:  return .black
+        case .black:  return Color(white: 0.75)
+        case .red:    return .black
+        case .blue:   return .black
         }
     }
 }
@@ -182,7 +269,7 @@ struct GreetingsOverlay: Identifiable {
     var id: UUID = UUID()
     var word: String = ""
     var presetID: String
-    var fixedPosition: GreetingsFixedPosition = .center
+    var fixedPosition: GreetingsFixedPosition = .left
     // Background badge opacity — slider-controlled, 0 (fully clear) to 1
     // (fully opaque), defaulting fully opaque.
     var backgroundOpacity: CGFloat = 1.0
@@ -190,10 +277,14 @@ struct GreetingsOverlay: Identifiable {
     // (which has its own, now-unused, fixed `badgeColor: Color`). Defaults
     // to the CardDrop brand blue.
     var badgeColorChoice: GreetingsBadgeColor = .blue
-    // "greetings from" script text color. nil = auto, tracking
-    // badgeColorChoice.defaultScriptColor as the badge color changes — once
-    // the user taps a swatch, this is set explicitly and stops tracking.
-    var scriptColorChoice: GreetingsScriptColor? = nil
+    // "greetings from" script text color — defaults to yellow (selected)
+    // rather than nil/auto so a swatch (and its halo) is always in effect
+    // without requiring the user to tap one first.
+    var scriptColorChoice: GreetingsScriptColor? = .yellow
+    // Whether the fixed-color halo/border shows behind the script text —
+    // independent of badgeColorChoice; the halo's own color is fixed per
+    // scriptColorChoice (see GreetingsScriptColor.haloColor), not user-chosen.
+    var haloEnabled: Bool = false
 
     init(presetID: String = GreetingsPreset.all[0].id) {
         self.presetID = presetID
@@ -208,9 +299,11 @@ struct GreetingsGeometry {
     static let bigWordFontName = "BowlbyOneSC-Regular"
 
     let displayWord: String
+    let wordCount: Int    // raw overlay.word.count (before the "Home" empty-word fallback) — used to gate bigWordPull
     let scriptFontSize:  CGFloat
     let bigWordFontSize: CGFloat
     let isLandscape: Bool        // pull (script-to-bigword overlap) differs by orientation
+    let isTilt: Bool             // Tilt gets a taller bottom margin than Center — see estimatedBadgeSize()
     let printScale: CGFloat      // canvas-units-per-print-pixel — needed so the fixed-print-pixel `margin` in estimatedBadgeSize() matches GreetingsCaptionView's real render exactly
     let bigWordWidth: CGFloat    // raw measured width of the big word at bigWordFontSize
     let scriptTextWidth: CGFloat // raw measured width of "greetings from" at scriptFontSize — the script line's own true width, NOT contentWidth (which is usually dominated by the much-wider big word)
@@ -221,12 +314,14 @@ struct GreetingsGeometry {
     // so the solver and the actual rendered text can never drift apart.
     static let scriptText = "\u{00A0}\u{00A0}greetings from"
 
-    init(word: String, fontName: String, bigWordFontSize: CGFloat, scriptFontSize: CGFloat, isLandscape: Bool, printScale: CGFloat) {
+    init(word: String, fontName: String, bigWordFontSize: CGFloat, scriptFontSize: CGFloat, isLandscape: Bool, printScale: CGFloat, isTilt: Bool = false) {
         let effectiveWord = word.isEmpty ? "Home" : word.uppercased()
         displayWord = effectiveWord
+        wordCount = word.count
         self.bigWordFontSize = bigWordFontSize
         self.scriptFontSize = scriptFontSize
         self.isLandscape = isLandscape
+        self.isTilt = isTilt
         self.printScale = printScale
 
         let w = BurstGeometry.measureText(effectiveWord, fontName: fontName, size: bigWordFontSize)
@@ -266,17 +361,21 @@ struct GreetingsGeometry {
     // keep these ratios in sync if those views' constants change.
     func estimatedBadgeSize() -> CGSize {
         let badgeHPad = bigWordFontSize * 0.06
-        // Flat 37.5px (print scale) margin, top and bottom — must match the
-        // `margin` constant in GreetingsCaptionView exactly, or this estimate
-        // (used to place the badge with zero top inset for .center/.corner)
+        // Fixed print-scale top/bottom margins — must match GreetingsCaptionView's
+        // topMargin/bottomMargin constants exactly (their sum is what matters
+        // here, since only the total height is used below), or this estimate
+        // (used to place the badge with zero top inset for .center)
         // under/overestimates the real height and crops the badge against
         // the canvas edge.
-        let margin = 37.5 * printScale
+        let topMargin = (isTilt ? 70 : (isLandscape ? 90 : 80)) * printScale
+        let bottomMargin = (isTilt ? -40 : -40) * printScale
         // Two independent pulls — script line pulled down toward the big
         // word, big word pulled up toward the script line — must match
-        // GreetingsCaptionView's ratios exactly.
-        let bigWordPull = scriptFontSize * (isLandscape ? 0.3 : 0.3)
-        let scriptPull = scriptFontSize * (isLandscape ? 0.35 : 0.35)
+        // GreetingsCaptionView's ratios exactly. Proportional to
+        // bigWordFontSize (not scriptFontSize) so the gap stays consistent
+        // regardless of word length.
+        let bigWordPull = bigWordFontSize * (wordCount <= 5 ? 0.0 : 0.1)
+        let scriptPull = bigWordFontSize * (isLandscape ? 0.2 : 0.2)
 
         let scriptFont = UIFont(name: GreetingsGeometry.scriptFontName, size: scriptFontSize)
         let scriptLayoutHeight = scriptFont.map { $0.ascender - $0.descender } ?? scriptFontSize
@@ -289,20 +388,20 @@ struct GreetingsGeometry {
         // script line above it — empirically it does not add anywhere near
         // its raw reserved amount to the badge's real visible height, so
         // it's left out here rather than counted in full (counting it in
-        // full overestimates height and pushes .center/.corner's zero-inset
+        // full overestimates height and pushes .center's zero-inset
         // placement down, leaving a gap at the canvas top).
         let bigWordHeight = (bigFont.ascender - bigFont.descender) + arcHeight
 
         // Empirical correction — the analytical formula above still doesn't
         // fully capture how the offset()/negative-padding pull tricks
         // interact with layout, and screenshots showed the estimate running
-        // long (a visible gap between .center/.corner's zero-inset
+        // long (a visible gap between .center's zero-inset
         // placement and the canvas top edge). Tune this value directly
         // against screenshots rather than re-deriving the formula.
         let heightFudge: CGFloat = (isLandscape ? 75 : 50) * printScale
 
         let width = badgeHPad * 2 + contentWidth
-        let height = margin + max(0, scriptLayoutHeight - scriptPull) + max(0, bigWordHeight - bigWordPull) + margin - heightFudge
+        let height = topMargin + max(0, scriptLayoutHeight - scriptPull) + max(0, bigWordHeight - bigWordPull) + bottomMargin - heightFudge
         return CGSize(width: width, height: height)
     }
 

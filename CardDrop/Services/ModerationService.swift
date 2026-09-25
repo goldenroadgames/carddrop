@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import Supabase
 
 enum ModerationResult {
     case clean
@@ -7,6 +8,35 @@ enum ModerationResult {
 }
 
 struct ModerationService {
+
+    // Cached after first fetch — thresholds rarely change mid-session, and
+    // this avoids a round trip on every moderation check. Keyed by OpenAI's
+    // raw category name (e.g. "harassment"), not the human-readable label.
+    // A category with no entry here keeps the strict default (see
+    // OAIItem.flaggedCategoryNames): block whenever OpenAI's own boolean
+    // flag is true.
+    private static var cachedThresholds: [String: Double]?
+
+    private static func thresholds() async -> [String: Double] {
+        if let cachedThresholds { return cachedThresholds }
+        struct Row: Decodable { let key: String; let value: String }
+        guard let rows: [Row] = try? await supabase
+            .from("zz_config")
+            .select("key, value")
+            .like("key", pattern: "moderation_threshold_%")
+            .execute()
+            .value
+        else {
+            return [:]
+        }
+        var result: [String: Double] = [:]
+        for row in rows {
+            let category = row.key.replacingOccurrences(of: "moderation_threshold_", with: "")
+            if let score = Double(row.value) { result[category] = score }
+        }
+        cachedThresholds = result
+        return result
+    }
 
     /// Check one or more text strings.
     static func check(texts: [String]) async -> ModerationResult {
@@ -48,6 +78,8 @@ struct ModerationService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
+        let thresholds = await thresholds()
+
         guard let (data, httpResponse) = try? await URLSession.shared.data(for: request) else {
             print("⚠️ ModerationService: network request failed")
             return .clean
@@ -63,7 +95,7 @@ struct ModerationService {
                 print("⚠️ ModerationService: retry also failed — blocking to be safe")
                 return .flagged(["content could not be verified"])
             }
-            let flagged = response.results.filter { $0.flagged }.flatMap { $0.flaggedCategoryNames }
+            let flagged = response.results.flatMap { $0.flaggedCategoryNames(thresholds: thresholds) }
             return flagged.isEmpty ? .clean : .flagged(flagged)
         }
 
@@ -73,8 +105,8 @@ struct ModerationService {
         }
 
         var flagged: Set<String> = []
-        for result in response.results where result.flagged {
-            flagged.formUnion(result.flaggedCategoryNames)
+        for result in response.results {
+            flagged.formUnion(result.flaggedCategoryNames(thresholds: thresholds))
         }
         return flagged.isEmpty ? .clean : .flagged(Array(flagged).sorted())
     }
@@ -101,10 +133,16 @@ private struct OAIResponse: Decodable {
 }
 
 private struct OAIItem: Decodable {
-    let flagged: Bool
     let categories: [String: Bool]
+    let category_scores: [String: Double]
 
-    var flaggedCategoryNames: [String] {
+    // A category only counts as flagged if its score clears OUR threshold
+    // (see zz_config's moderation_threshold_* rows, migration 031) — not
+    // just OpenAI's own boolean, which proved too strict for "harassment"
+    // in a novelty-postcard app (mild jabs are the whole point). A category
+    // with no configured threshold falls back to 0.0 — i.e. OpenAI's
+    // boolean alone still blocks it, same as before this change.
+    func flaggedCategoryNames(thresholds: [String: Double]) -> [String] {
         let labels: [String: String] = [
             "harassment":              "harassment",
             "harassment/threatening":  "threatening harassment",
@@ -122,6 +160,7 @@ private struct OAIItem: Decodable {
         ]
         return categories
             .filter { $0.value }
+            .filter { (category_scores[$0.key] ?? 1.0) >= (thresholds[$0.key] ?? 0.0) }
             .compactMap { labels[$0.key] ?? $0.key }
             .sorted()
     }

@@ -9,6 +9,8 @@
 	</array>
 	<key>NSContactsUsageDescription</key>
 	<string>CardDrop uses your contacts to help you address cards to recipients.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>CardDrop uses your camera to let you take a photo for your card.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>CardDrop saves photos you choose to your camera roll.</string>
 	<key>CFBundleURLTypes</key>

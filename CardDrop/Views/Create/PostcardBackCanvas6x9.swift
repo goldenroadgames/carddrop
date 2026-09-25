@@ -59,6 +59,13 @@ struct PostcardBackCanvas6x9: View {
         let bandH: CGFloat = bandDesignH * bandScale
         let bandX: CGFloat = 2820
         let bandY: CGFloat = 940
+        // Band's actual drawn position — offset from bandX/bandY, which stay
+        // fixed as the inputs to the message polygon's zone math above/below.
+        // Right edge flush with the gray rectangle's right edge — that
+        // rectangle is inset 40px from the raw no-ink zone's right edge
+        // (InkZoneContent6x9 draws it at zoneWidth - 80, centered).
+        let bandOffsetX: CGFloat = noInkLeft + noInkWidth - 40 - bandW
+        let bandOffsetY: CGFloat = 970
 
         // Message-area polygon — three zones, same shape as the 4x6 back's:
         // the band is narrower than the no-ink zone here, so the obstacle
@@ -73,14 +80,14 @@ struct PostcardBackCanvas6x9: View {
         // zone (`noInkLeft`/`noInkTop` below), which is intentionally kept
         // separate from this polygon's own obstacle edges.
         let messageAreaLeftX: CGFloat = 160
-        let messageAreaTopY:  CGFloat = 143
+        let messageAreaTopY:  CGFloat = 113
         let messageAreaMaxX:  CGFloat = 3910
-        let messageAreaMaxY:  CGFloat = 2646
-        let messagePolygonNoInkTop:  CGFloat = 1625
+        let messageAreaMaxY:  CGFloat = 2616
+        let messagePolygonNoInkTop:  CGFloat = 1595
         let messagePolygonNoInkLeft: CGFloat = 2200
         let messageZones: [MessageZone6x9] = [
             MessageZone6x9(yStart: messageAreaTopY, yEnd: bandY + 3,     right: messageAreaMaxX),
-            MessageZone6x9(yStart: bandY + 3,           yEnd: messagePolygonNoInkTop + 3,  right: bandX),
+            MessageZone6x9(yStart: bandY + 3,           yEnd: messagePolygonNoInkTop + 3,  right: bandOffsetX - 40),
             MessageZone6x9(yStart: messagePolygonNoInkTop + 3, yEnd: messageAreaMaxY, right: messagePolygonNoInkLeft)
         ]
 
@@ -91,7 +98,7 @@ struct PostcardBackCanvas6x9: View {
                 .frame(width: bandDesignW, height: bandDesignH)
                 .scaleEffect(bandScale)
                 .frame(width: bandW, height: bandH)
-                .offset(x: bandX, y: bandY)
+                .offset(x: bandOffsetX, y: bandOffsetY)
 
             let message = draft.message.trimmingCharacters(in: .whitespacesAndNewlines)
             if !message.isEmpty {
@@ -150,7 +157,10 @@ private struct InkZoneContent6x9: View {
     private let phraseSideMargin: CGFloat = 250
 
     private var sharedFont: UIFont {
-        UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        // UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        // UIFont(name: "SpecialElite-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        // UIFont(name: "CourierPrime-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        UIFont(name: "AmericanTypewriter", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
     }
 
     var body: some View {
@@ -266,8 +276,8 @@ private struct MessagePolygonLabel6x9: View {
     let maxY: CGFloat
     let zones: [MessageZone6x9]
 
-    private let fontSize: CGFloat = 176
-    private let lineHeight: CGFloat = 179
+    private let fontSize: CGFloat = 154
+    private let lineHeight: CGFloat = 164
     private let startIndent: CGFloat = 50
     private let inkColor = UIColor(red: 0.11, green: 0.24, blue: 0.45, alpha: 1)
 
@@ -291,7 +301,10 @@ private struct MessagePolygonLabel6x9: View {
 
     var body: some View {
         Canvas { context, _ in
-            let font = UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            // let font = UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            // let font = UIFont(name: "SpecialElite-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            // let font = UIFont(name: "CourierPrime-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            let font = UIFont(name: "AmericanTypewriter", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
 
             // Start at a fixed position (line 2's slot, still inside the
             // wide Zone A), indented, instead of the very top, so typing

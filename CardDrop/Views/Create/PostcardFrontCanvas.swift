@@ -79,35 +79,7 @@ struct PostcardFrontCanvas: View {
                         )
                 }
                 ForEach(greetingsOverlays) { greeting in
-                    // Rendered once as a bitmap at the canonical print
-                    // resolution (see GreetingsBadgeRenderer) — the exact
-                    // same code path/bitmap the live editor scales down to
-                    // preview, so the two can never drift apart. Scaled here
-                    // only if imageAreaSize is smaller than the true print
-                    // resolution (e.g. a bordered/inset front).
-                    let isLandscapeGreetings = imageAreaSize.width >= imageAreaSize.height
-                    let greetingsReferenceWidth: CGFloat = isLandscapeGreetings ? 2775 : 1875
-                    let greetingsDisplayScale = imageAreaSize.width / greetingsReferenceWidth
-                    if let rendered = GreetingsBadgeRenderer.render(overlay: greeting, isLandscape: isLandscapeGreetings) {
-                        // +75 bleed-margin match — see GreetingsCaptionView's identical fix.
-                        let badgeSize: CGSize = greeting.fixedPosition == .left
-                            ? CGSize(width: isLandscapeGreetings ? 2925 : 2000, height: rendered.size.height)
-                            : rendered.size
-                        let center = greeting.fixedPosition.center(badgeSize: badgeSize, canvasSize: CGSize(width: greetingsReferenceWidth, height: greetingsReferenceWidth * imageAreaSize.height / imageAreaSize.width))
-                        let w = rendered.size.width * greetingsDisplayScale
-                        let h = rendered.size.height * greetingsDisplayScale
-                        // The bitmap itself has a transparent background
-                        // (see GreetingsBadgeRenderer) — draw the badge
-                        // color underneath it here.
-                        ZStack {
-                            Rectangle().fill(greeting.badgeColorChoice.color.opacity(greeting.backgroundOpacity))
-                            Image(uiImage: rendered.image)
-                                .resizable()
-                        }
-                        .frame(width: w, height: h)
-                        .rotationEffect(Angle(degrees: greeting.fixedPosition.rotationDegrees))
-                        .position(x: center.x * greetingsDisplayScale, y: center.y * greetingsDisplayScale)
-                    }
+                    greetingsBadgeView(greeting)
                 }
                 ForEach(overlays) { overlay in
                     overlayView(overlay)
@@ -159,6 +131,71 @@ struct PostcardFrontCanvas: View {
         let ctx = CIContext()
         guard let cg = ctx.createCGImage(scaled, from: scaled.extent) else { return nil }
         return UIImage(cgImage: cg)
+    }
+
+    @ViewBuilder
+    private func greetingsBadgeView(_ greeting: GreetingsOverlay) -> some View {
+        // Rendered once as a bitmap at the canonical print resolution (see
+        // GreetingsBadgeRenderer) — the exact same code path/bitmap the live
+        // editor scales down to preview, so the two can never drift apart.
+        // Scaled here only if imageAreaSize is smaller than the true print
+        // resolution (e.g. a bordered/inset front).
+        let isLandscapeGreetings = imageAreaSize.width >= imageAreaSize.height
+        let greetingsReferenceWidth: CGFloat = isLandscapeGreetings ? 2775 : 1875
+        let greetingsDisplayScale = imageAreaSize.width / greetingsReferenceWidth
+        if let rendered = GreetingsBadgeRenderer.render(overlay: greeting, isLandscape: isLandscapeGreetings) {
+            // Badge always sizes itself to its true rendered content —
+            // Tilt's clearance from the card's left/right edges is
+            // guaranteed by the rotated-bounding-box math in
+            // GreetingsFixedPosition.center().
+            let center = greeting.fixedPosition.center(badgeSize: rendered.size, canvasSize: CGSize(width: greetingsReferenceWidth, height: greetingsReferenceWidth * imageAreaSize.height / imageAreaSize.width))
+            let w = rendered.size.width * greetingsDisplayScale
+            let h = rendered.size.height * greetingsDisplayScale
+
+            // Tilt's background "ribbon" is positioned/sized independently
+            // of the text — `center` above is already solved to guarantee
+            // 0.5in clearance from the card's left/right edges (see
+            // GreetingsFixedPosition.center()); the ribbon instead centers
+            // itself on the card's own horizontal midpoint and is widened
+            // just enough that its rotated footprint bleeds off both edges.
+            // `t` is the shift (print-scale, along the ribbon's own rotated
+            // axis) between the two centers, applied as a live offset on
+            // the text image so one shared rotation/position transform
+            // serves both.
+            let isTiltPos = greeting.fixedPosition == .left
+            let rotationDeg = greeting.fixedPosition.rotationDegrees(isLandscape: isLandscapeGreetings)
+            let theta = rotationDeg * .pi / 180
+            let t: CGFloat = isTiltPos ? (greetingsReferenceWidth / 2 - center.x) / cos(theta) : 0
+            let ribbonCenter = CGPoint(x: center.x + t * cos(theta), y: center.y + t * sin(theta))
+
+            // Centered badges get a background that spans the full card
+            // width — the badge content (image) stays its own natural size,
+            // centered within that wider background, rather than being
+            // stretched to fill it. Tilt gets a similarly wide background
+            // (the bleeding ribbon), computed to guarantee edge-to-edge
+            // coverage once rotated.
+            // +150 (0.5in print-scale) overshoot on each side beyond the
+            // exact minimum — the bare-minimum width just barely grazes the
+            // edges with zero margin, vulnerable to rounding; overshooting
+            // is free since the excess is simply clipped off-canvas.
+            let ribbonWidthPrintScale = (greetingsReferenceWidth + 300 - rendered.size.height * abs(sin(theta))) / abs(cos(theta))
+            let bgWidth: CGFloat = greeting.fixedPosition == .center
+                ? imageAreaSize.width
+                : (isTiltPos ? ribbonWidthPrintScale * greetingsDisplayScale : w)
+            // The bitmap itself has a transparent background (see
+            // GreetingsBadgeRenderer) — draw the badge color underneath it here.
+            ZStack {
+                Rectangle().fill(greeting.badgeColorChoice.color.opacity(greeting.backgroundOpacity))
+                    .frame(width: bgWidth, height: h)
+                Image(uiImage: rendered.image)
+                    .resizable()
+                    .frame(width: w, height: h)
+                    .offset(x: -t * greetingsDisplayScale)
+            }
+            .frame(width: bgWidth, height: h)
+            .rotationEffect(Angle(degrees: rotationDeg))
+            .position(x: ribbonCenter.x * greetingsDisplayScale, y: ribbonCenter.y * greetingsDisplayScale)
+        }
     }
 
     @ViewBuilder

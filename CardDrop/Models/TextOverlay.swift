@@ -16,10 +16,21 @@ struct QROverlay: Identifiable {
 
     static let defaultContent = "CardDrop - the OG Personal Messenger"
 
-    /// Snaps normalizedPosition to the nearest corner given the canvas size, with padding.
-    mutating func snapToNearestCorner(canvasSize: CGSize) {
+    // The front print canvas is always baked at a fixed 300 DPI (see
+    // CardRenderer.frontLongSideBleed / frontShortSideBleed), so 3/8" is a
+    // constant number of print-canvas points regardless of card size —
+    // converting through printCanvasSize/canvasSize's ratio lands it in
+    // whatever canvasSize's own point space is (editor or print), same
+    // approach as TextOverlayItemView's safeInset.
+    private static func insetPoints(canvasSize: CGSize, printCanvasSize: CGSize) -> CGFloat {
+        guard printCanvasSize.width > 0 else { return 8 }
+        return (0.375 * 300) * (canvasSize.width / printCanvasSize.width)
+    }
+
+    /// Snaps normalizedPosition to the nearest corner given the canvas size, inset 3/8" from each edge.
+    mutating func snapToNearestCorner(canvasSize: CGSize, printCanvasSize: CGSize) {
         let size = QROverlay.fixedNormalizedSize * min(canvasSize.width, canvasSize.height)
-        let pad: CGFloat = 8
+        let pad = Self.insetPoints(canvasSize: canvasSize, printCanvasSize: printCanvasSize)
         let halfSize = size / 2
         let margin = (halfSize + pad) / canvasSize.width
         let marginV = (halfSize + pad) / canvasSize.height
@@ -38,16 +49,18 @@ struct QROverlay: Identifiable {
     }
 
     /// Flips horizontal between left and right corners, preserving top/bottom.
-    mutating func flipHorizontal(canvasSize: CGSize) {
+    mutating func flipHorizontal(canvasSize: CGSize, printCanvasSize: CGSize) {
         let size = QROverlay.fixedNormalizedSize * min(canvasSize.width, canvasSize.height)
-        let margin = (size / 2 + 4) / canvasSize.width
+        let pad = Self.insetPoints(canvasSize: canvasSize, printCanvasSize: printCanvasSize)
+        let margin = (size / 2 + pad) / canvasSize.width
         normalizedPosition.x = normalizedPosition.x < 0.5 ? 1 - margin : margin
     }
 
     /// Flips vertical between top and bottom corners, preserving left/right.
-    mutating func flipVertical(canvasSize: CGSize) {
+    mutating func flipVertical(canvasSize: CGSize, printCanvasSize: CGSize) {
         let size = QROverlay.fixedNormalizedSize * min(canvasSize.width, canvasSize.height)
-        let marginV = (size / 2 + 4) / canvasSize.height
+        let pad = Self.insetPoints(canvasSize: canvasSize, printCanvasSize: printCanvasSize)
+        let marginV = (size / 2 + pad) / canvasSize.height
         normalizedPosition.y = normalizedPosition.y < 0.5 ? 1 - marginV : marginV
     }
 }
@@ -276,18 +289,20 @@ struct TextOverlayBubbleView: View {
         case .box:
             RoundedRectangle(cornerRadius: 30 * scale)
                 .fill(overlay.bgColor)
-                .overlay(RoundedRectangle(cornerRadius: 30 * scale).stroke(Color.black, lineWidth: 2 * scale))
+                .overlay(RoundedRectangle(cornerRadius: 30 * scale).stroke(Color.black, lineWidth: 3 * scale))
         case .speech:
-            // Body and tail are two subpaths that only overlap slightly at
-            // their join, so a plain .stroke() draws a seam there. Inflate +
-            // fill-behind (black copy slightly larger, drawn behind the
-            // normal-size colored copy, both filled never stroked) instead.
-            ZStack {
-                SpeechBubbleShape(tailPosition: overlay.tailHPosition, tailOnBottom: !overlay.tailFlippedV, inflate: 2, scale: scale)
-                    .fill(Color.black)
-                SpeechBubbleShape(tailPosition: overlay.tailHPosition, tailOnBottom: !overlay.tailFlippedV, scale: scale)
-                    .fill(overlay.bgColor)
-            }
+            // Unlike the old body+tail-as-two-subpaths version, the traced
+            // SVG artwork is ONE continuous outer contour, so a plain
+            // .stroke() now draws a clean, correctly-offset outline with no
+            // seam — including on concave curves (like the tail's inner
+            // edge), which the old inflate/fill-behind trick got wrong
+            // there: scaling the whole shape from its bounding box doesn't
+            // push a concave edge outward along its own local normal the
+            // way a true stroke does.
+            let bubble = SpeechBubbleShape(tailPosition: overlay.tailHPosition, tailOnBottom: !overlay.tailFlippedV, scale: scale)
+            bubble
+                .fill(overlay.bgColor)
+                .overlay(bubble.stroke(Color.black, lineWidth: 3 * scale))
         case .thought:
             // Same inflate/fill-behind reasoning as .speech above — a plain
             // .stroke() on the cloud would draw each circle's full boundary,
@@ -295,7 +310,7 @@ struct TextOverlayBubbleView: View {
             // No left/right tail control for thought bubbles — always dead
             // center — but up/down still selects top vs bottom.
             ZStack {
-                ThoughtBubbleShape(tailOnBottom: !overlay.tailFlippedV, inflate: 2, scale: scale)
+                ThoughtBubbleShape(tailOnBottom: !overlay.tailFlippedV, inflate: 3, scale: scale)
                     .fill(Color.black)
                 ThoughtBubbleShape(tailOnBottom: !overlay.tailFlippedV, scale: scale)
                     .fill(overlay.bgColor)
@@ -314,79 +329,62 @@ struct TextOverlayBubbleView: View {
 struct SpeechBubbleShape: Shape {
     var tailPosition: TailHPosition = .left
     var tailOnBottom: Bool = true
-    // When > 0, grows both the rounded-rect body and the triangle tail —
-    // used the same way as ThoughtBubbleShape's `inflate`: draw an inflated
-    // black copy behind the normal (inflate: 0) colored copy, both filled
-    // (never stroked), so overlaps never show a seam. See that shape's
-    // comment for why plain .stroke() doesn't work here. Expressed in
-    // editor-native points — scaled by `scale` internally like everything else.
+    // When > 0, draws an inflated black copy behind the normal (inflate: 0)
+    // colored copy, both filled (never stroked) — see ThoughtBubbleShape's
+    // comment for why plain .stroke() doesn't work for this seamless-outline
+    // trick. Expressed in editor-native points, scaled by `scale` like
+    // everything else.
     var inflate: CGFloat = 0
-    // Editor-canvas-native size -> print-resolution-canvas size multiplier
-    // (same role as PostcardFrontCanvas's `fontScale`) — EVERY absolute-pt
-    // constant in this shape must be multiplied by `scale`, or the tail/
-    // corner-radius/outline proportions drift between the small live editor
-    // preview and the ~2700px print bake (they used to be literal points,
-    // fine-looking in the small editor canvas but proportionally tiny
-    // against the huge print canvas). Defaults to 1 (editor-native).
     var scale: CGFloat = 1
-    private static let baseTailHeight: CGFloat = 28  // 2x
+    private static let baseTailHeight: CGFloat = 16
     static func tailHeight(scale: CGFloat) -> CGFloat { baseTailHeight * scale }
 
+    // Hand-traced speech-bubble artwork (outer silhouette only — the source
+    // SVG's second subpath is an inner contour of opposite winding used to
+    // render a hollow outline-only stroke as one filled shape; we want a
+    // SOLID fill behind the text instead, so only the first (outer) subpath
+    // is kept here, and the black outline is produced separately via the
+    // `inflate` fill-behind trick above, matching every other bubble style).
+    // Canonical orientation as traced: tail hanging off the bottom, leaning
+    // right — matched to (tailOnBottom: true, tailPosition: .right) below;
+    // every other combination is a mirror of this one path, never a
+    // separately re-derived shape.
+    private static let rawPathD = "m -1204.8253,-348.45271 c 15.8343,-16.13215 25.4152,-37.21463 32.6937,-58.34632 -56.3216,-8.84838 -115.3405,-30.35823 -150.1,-78.10221 -21.4603,-28.73559 -21.355,-70.29174 -0.3488,-99.23463 32.3863,-45.93704 88.4909,-67.54108 142.0048,-76.84005 72.0644,-11.29981 149.8975,-3.14689 213.29756,34.8694 28.16925,19.04667 56.12022,45.55334 60.02066,81.24608 5.88859,43.29905 -26.03284,80.69483 -60.90096,101.78265 -42.35326,26.07186 -92.26076,36.41748 -141.32626,39.86364 -26.0471,25.86359 -55.4567,52.32759 -92.494,59.67099 -8.9468,0.26522 -10.5303,1.82914 -2.8467,-4.90955 z"
+    // Reuses the project's existing SVG path-data parser (BurstCaptionOverlay.swift) —
+    // same M/m L/l C/c Z/z subset it already loads burst shapes with.
+    private static let baseCGPath: CGPath? = SVGPathParser.parse(rawPathD)
+    private static let baseBounds: CGRect = baseCGPath?.boundingBoxOfPath ?? .zero
+
     func path(in rect: CGRect) -> Path {
-        let tailH = Self.tailHeight(scale: scale)
+        guard let cgPath = Self.baseCGPath else { return Path() }
+        let b = Self.baseBounds
+        guard b.width > 0, b.height > 0 else { return Path(cgPath) }
+
         let infl = inflate * scale
-        let bubbleRect: CGRect
-        if tailOnBottom {
-            bubbleRect = CGRect(x: rect.minX, y: rect.minY,
-                                width: rect.width, height: rect.height - tailH)
-        } else {
-            bubbleRect = CGRect(x: rect.minX, y: rect.minY + tailH,
-                                width: rect.width, height: rect.height - tailH)
+        let target = rect.insetBy(dx: -infl, dy: -infl)
+
+        // Map the artwork's own bounding box onto the target rect —
+        // non-uniform scale, so it stretches to fit whatever aspect ratio
+        // the current text box needs, the same way the previous procedural
+        // shapes filled their rect.
+        var t = CGAffineTransform(translationX: -b.minX, y: -b.minY)
+        t = t.concatenating(CGAffineTransform(scaleX: target.width / b.width, y: target.height / b.height))
+        t = t.concatenating(CGAffineTransform(translationX: target.minX, y: target.minY))
+
+        // Mirror around the target rect's center for the other 3
+        // tailOnBottom/tailPosition combinations — flipping the one
+        // canonical asset, like flipping an SVG, rather than tracing a
+        // second variant that could drift out of sync with the first.
+        let sx: CGFloat = tailPosition == .left ? -1 : 1
+        let sy: CGFloat = tailOnBottom ? 1 : -1
+        if sx != 1 || sy != 1 {
+            let cx = target.midX, cy = target.midY
+            t = t.concatenating(CGAffineTransform(translationX: -cx, y: -cy))
+            t = t.concatenating(CGAffineTransform(scaleX: sx, y: sy))
+            t = t.concatenating(CGAffineTransform(translationX: cx, y: cy))
         }
 
-        var path = Path(roundedRect: bubbleRect.insetBy(dx: -infl, dy: -infl), cornerRadius: 30 * scale + infl)
-
-        // Base of the triangle is widened and pulled `overlap` points INTO
-        // the bubble body (rather than sitting exactly on its edge) so the
-        // two subpaths genuinely intersect instead of merely touching —
-        // required for the inflate/fill-behind outline trick to work
-        // seamlessly at the join.
-        let baseWidth: CGFloat = 28 * scale  // widened to match the now-longer (2x) tail
-        let overlap: CGFloat = 8 * scale
-        let baseX: CGFloat
-        let apexX: CGFloat
-        // Anchored 25% of the bubble's CURRENT width in from the respective
-        // edge — proportional, not a fixed pixel offset, so the tail stays
-        // correctly attached to the body as the bubble is resized wider.
-        let baseCenterX: CGFloat
-        switch tailPosition {
-        case .left:  baseCenterX = bubbleRect.minX + bubbleRect.width * 0.25
-        case .right: baseCenterX = bubbleRect.maxX - bubbleRect.width * 0.25
-        }
-        baseX = baseCenterX - baseWidth / 2
-        apexX = baseCenterX
-
-        if tailOnBottom {
-            path.move(to:    CGPoint(x: baseX - infl,             y: bubbleRect.maxY - overlap))
-            path.addLine(to: CGPoint(x: baseX + baseWidth + infl, y: bubbleRect.maxY - overlap))
-            path.addLine(to: CGPoint(x: apexX,                    y: rect.maxY + infl))
-        } else {
-            // Base points deliberately listed in the OPPOSITE order from the
-            // tailOnBottom case (right corner first, then left) — Path fills
-            // use the non-zero winding rule, and simply flipping the apex
-            // from below to above (without also reversing the base order)
-            // flips this triangle's winding relative to the rounded-rect
-            // body's. Where they overlap, opposite windings cancel to a
-            // hole instead of reinforcing into a solid union — this read as
-            // a see-through notch cut into the bubble. Reversing the base
-            // order here keeps the winding matched.
-            path.move(to:    CGPoint(x: baseX + baseWidth + infl, y: bubbleRect.minY + overlap))
-            path.addLine(to: CGPoint(x: baseX - infl,             y: bubbleRect.minY + overlap))
-            path.addLine(to: CGPoint(x: apexX,                    y: rect.minY - infl))
-        }
-        path.closeSubpath()
-
-        return path
+        return Path(cgPath.copy(using: &t) ?? cgPath)
     }
 }
 

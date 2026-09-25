@@ -42,6 +42,7 @@ struct ProfileView: View {
                     emailSection
                     nicknameSection
                     profileSection
+                    mailingAddressesSection
                     if authManager.isEmailVerified {
                         storageSection
                     }
@@ -186,6 +187,21 @@ struct ProfileView: View {
             Text("Profile")
                 .font(.system(size: 13, weight: .regular))
                 .textCase(.none)
+        }
+    }
+
+    // MARK: - Mailing addresses
+
+    @ViewBuilder
+    private var mailingAddressesSection: some View {
+        Section {
+            NavigationLink {
+                MailingAddressBookView()
+            } label: {
+                Label("Mailing Addresses", systemImage: "envelope.fill")
+            }
+        } footer: {
+            Text("Saved, verified addresses for mailing real postcards.")
         }
     }
 

@@ -1,6 +1,5 @@
 import Combine
 import SwiftUI
-import PhotosUI
 
 struct CreateFlowView: View {
     @Environment(\.dismiss) private var dismiss
@@ -12,15 +11,28 @@ struct CreateFlowView: View {
     @StateObject private var draft: PostcardDraft
     @State private var currentStep: Int
     @State private var currentDraftID: UUID?
-    @State private var photoItem: PhotosPickerItem?
     @State private var originalStatus: CardStatus = .unsent
     @State private var isDirty = false
     @State private var showSavedBanner = false
+    // originalStatus is fixed at init and never updated mid-session, so it
+    // can't be used to detect "sent during this session" — closeButton
+    // needs its own flag to avoid re-saving as .unsent after a send.
+    @State private var hasSentThisSession = false
     @State private var filteredImage: UIImage? = nil
+    // Handed straight to SendOptionsView so it doesn't have to re-read
+    // bakeDraftArt()'s disk output, which can still be mid-write when the
+    // Send step first appears — see SendOptionsView's freshBackImage doc.
+    @State private var bakedFrontImage: UIImage? = nil
+    @State private var bakedBackImage: UIImage? = nil
+    @State private var bakedBack6x9Image: UIImage? = nil
 
     @State private var isModerating = false
     @State private var moderationFlagged: [String] = []
     @State private var showHardBlockAlert = false
+    // Mirrored from SendOptionsView's isSubmittingToLOB — blocks the
+    // toolbar Close button while a postcard order is mid-submit, same as
+    // the Finish button on the Send Options screen itself.
+    @State private var isSubmittingToLOB = false
 
     // Default: new blank postcard
     init() {
@@ -49,7 +61,7 @@ struct CreateFlowView: View {
             Group {
                 switch currentStep {
                 case 0:
-                    ChoosePhotoStepView(draft: draft, photoItem: $photoItem, onNext: { currentStep = 1 })
+                    ChoosePhotoStepView(draft: draft, onNext: { currentStep = 1 })
                 case 1:
                     TextOverlayStepView(draft: draft, onNext: { currentStep = 2 })
                 case 2:
@@ -59,16 +71,16 @@ struct CreateFlowView: View {
                 case 3:
                     InvisibleInkStepView(draft: draft, onNext: { currentStep = 4 })
                 case 4:
-                    BackOfCardStepView(draft: draft, onNext: { currentStep = 5 })
-                case 5:
                     SendOptionsView(draft: draft, filteredImage: filteredImage,
+                                    freshFrontImage: bakedFrontImage,
+                                    freshBackImage: bakedBackImage,
+                                    freshBack6x9Image: bakedBack6x9Image,
                                     originalStatus: originalStatus,
                                     hasDraftSaved: currentDraftID != nil,
                                     onSaveUnsent:    { saveDraft(status: .unsent) },
-                                    onSaveSent:      { saveDraft(status: .sent) },
+                                    onSaveSent:      { saveDraft(status: .sent); hasSentThisSession = true },
                                     onGoToFront:     { currentStep = 1 },
                                     onGoToBack:      { currentStep = 2 },
-                                    onGoToAddress:   { currentStep = 4 },
                                     onFinish:        { dismiss() },
                                     onSendToSomeoneElse: {
                                         let clone = draft.cloneForNewRecipient()
@@ -86,7 +98,8 @@ struct CreateFlowView: View {
                                         } else {
                                             currentStep = 0
                                         }
-                                    })
+                                    },
+                                    onSubmittingToLOBChanged: { isSubmittingToLOB = $0 })
                 default:
                     Text("More steps coming soon")
                         .foregroundColor(.secondary)
@@ -128,17 +141,14 @@ struct CreateFlowView: View {
                 updateThumbnail()
                 // Forward or backward — either way, leaving Choose Photo
                 // (photo/orientation/border/filter content), Style It (front
-                // text-overlay content), Write Card (back message/greeting/
-                // phrase content), or Addresses (back sender/recipient
-                // content — the last step that touches the back) bakes+saves
-                // the real {cardID}_front.jpg/_back.jpg/_back6x9.jpg now
-                // rather than waiting for Preview to first appear. Close
-                // doesn't change currentStep, so it's handled separately
-                // below.
+                // text-overlay content), or Write Card (back message/
+                // greeting/phrase content) bakes+saves the real
+                // {cardID}_front.jpg/_back.jpg/_back6x9.jpg now rather than
+                // waiting for Preview to first appear. Close doesn't change
+                // currentStep, so it's handled separately below.
                 if oldValue == 0 && newValue != 0 { bakeDraftArt() }
                 if oldValue == 1 && newValue != 1 { bakeDraftArt() }
                 if oldValue == 2 && newValue != 2 { bakeDraftArt() }
-                if oldValue == 4 && newValue != 4 { bakeDraftArt() }
             }
 
             .onReceive(draft.objectWillChange) { _ in isDirty = true }
@@ -182,7 +192,7 @@ struct CreateFlowView: View {
     // Bakes+saves the real {cardID}_front.jpg and _back.jpg (CardRenderer
     // always renders both together) whenever the user leaves either step
     // that changes what ends up on them — Style It (front photo/text
-    // overlays) or Addresses (back message/greeting/phrase) — forward,
+    // overlays) or Write Card (back message/greeting/phrase) — forward,
     // backward, or Close — instead of only lazily at Preview time.
     // Fire-and-forget: the caller doesn't await this, so it never blocks
     // navigation/dismiss.
@@ -201,7 +211,11 @@ struct CreateFlowView: View {
             // user taps Close. Yield first so the dismiss transition gets to
             // happen before this heavy work runs.
             await Task.yield()
-            _ = CardRenderer.renderAndSave(draft: d, filteredImage: img, draftManager: dm)
+            if let result = CardRenderer.renderAndSave(draft: d, filteredImage: img, draftManager: dm) {
+                bakedFrontImage   = result.front
+                bakedBackImage    = result.back
+                bakedBack6x9Image = result.back6x9
+            }
         }
     }
 
@@ -269,8 +283,7 @@ struct CreateFlowView: View {
         case 1: return "Style It"
         case 2: return "Write Card"
         case 3: return "Invisible Ink"
-        case 4: return "Addresses"
-        case 5: return "Send"
+        case 4: return "Send"
         default: return "Create"
         }
     }
@@ -341,33 +354,34 @@ struct CreateFlowView: View {
                         }
                     }
                     .foregroundColor(
-                        (currentStep >= 5 || (currentStep == 0 && !hasStarted) || isModerating)
+                        (currentStep >= 4 || (currentStep == 0 && !hasStarted) || isModerating)
                             ? Color.brandBlue.opacity(0.4) : Color.brandBlue
                     )
                     .frame(width: 36, height: 32)
                 }
                 .buttonStyle(.plain)
-                .disabled(currentStep >= 5 || (currentStep == 0 && !hasStarted) || isModerating)
+                .disabled(currentStep >= 4 || (currentStep == 0 && !hasStarted) || isModerating)
             }
         }
     }
 
     private var closeButton: some View {
         Button {
-            if hasStarted && (originalStatus == .unsent || isDirty) {
+            if hasStarted && !hasSentThisSession && (originalStatus == .unsent || isDirty) {
                 saveDraft()
                 // Close doesn't change currentStep, so it isn't
                 // caught by the onChange(of: currentStep) below —
                 // needs its own explicit call.
-                if currentStep == 0 || currentStep == 1 || currentStep == 2 || currentStep == 4 { bakeDraftArt() }
+                if currentStep == 0 || currentStep == 1 || currentStep == 2 { bakeDraftArt() }
             }
             dismiss()
         } label: {
             Text("Close")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.brandBlue)
+                .foregroundColor(isSubmittingToLOB ? .secondary : .brandBlue)
         }
         .buttonStyle(.plain)
+        .disabled(isSubmittingToLOB)
     }
 }
 

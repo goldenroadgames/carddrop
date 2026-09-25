@@ -441,34 +441,42 @@ struct GreetingsCaptionView: View {
     // drawn separately, live, so a background-opacity slider can respond
     // instantly without invalidating/re-rendering the cached bitmap).
     var drawsBackground: Bool = true
-    // When set (only for the "tilt" position), stretches the badge
-    // background to this width regardless of the word's own content width —
-    // content stays centered inside it via the .frame's default center
-    // alignment, before the tilt rotation is applied by the caller.
-    var backgroundMinWidth: CGFloat? = nil
-    // When set (only for landscape tilt), left-justifies the content this
-    // many print-scale px from backgroundMinWidth's left edge instead of
-    // centering it — a fixed inset regardless of word length, unlike a
-    // center-offset (which drifts with content width since it shifts a
-    // width-dependent center point rather than pinning the left edge).
-    var contentLeadingInset: CGFloat? = nil
     // Extra horizontal padding added on TOP of badgeHPad, per side (print
-    // scale) — used to widen the badge for .center/.corner without
-    // affecting .left/tilt, which already sizes itself via backgroundMinWidth.
+    // scale) — the letters' own inset from the badge's edge (both .center
+    // and .left/tilt now size themselves to their true content; Tilt's real
+    // clearance from the CARD's edges comes from the rotated-bounding-box
+    // math in GreetingsFixedPosition.center(...), not from this).
     var extraHorizontalPad: CGFloat = 0
+    // Extra fixed leading padding, tilt (.left) only.
+    var isTilt: Bool = false
+    // Solid halo color drawn behind the script text (badge's own background
+    // color choice) — fixed at 100% opacity always, independent of
+    // backgroundOpacity, so the script stays legible even when the badge's
+    // own background is faded out or set to .transparent.
+    var scriptBorderColor: Color = .clear
 
     var body: some View {
         let g = GreetingsGeometry(word: word, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: printScale)
-        let bigWordPull = g.scriptFontSize * (isLandscape ? 0.3 : 0.3)
-        let scriptPull = g.scriptFontSize * (isLandscape ? 0.35 : 0.35)
+        // Proportional to bigWordFontSize (not scriptFontSize, which never
+        // changes) so the visual gap stays consistent regardless of word
+        // length — previously a fixed scriptFontSize-based pull represented
+        // an increasingly large fraction of the big word as long words
+        // shrunk their own font, pulling the two closer together. Starting
+        // ratios only — bigWordFontSize is typically several times
+        // scriptFontSize, so these aren't the same numbers as before;
+        // expect to need visual tuning.
+        let bigWordPull = g.bigWordFontSize * (g.wordCount <= 5 ? 0.0 : 0.1)
+        let scriptPull = g.bigWordFontSize * (isLandscape ? 0.2 : 0.2)
         let badgeHPad = g.bigWordFontSize * 0.06 + extraHorizontalPad * printScale
         let scriptText = "\u{00A0}\u{00A0}greetings from"
 
-        // Top/bottom margins are both fixed at 37.5px (print scale), measured
-        // to the true highest point of "greetings from" and the true lowest
-        // point of the big word (extrusion drop included) — not to their
-        // layout frames.
-        let margin = 37.5 * printScale
+        // Top/bottom margins, fixed print-scale px, measured to the true
+        // highest point of "greetings from" and the true lowest point of the
+        // big word (extrusion drop included) — not to their layout frames.
+        // Tilt gets a taller bottom margin than Center — must stay in sync
+        // with GreetingsGeometry.estimatedBadgeSize()'s matching constants.
+        let topMargin = (isTilt ? 70 : (isLandscape ? 90 : 80)) * printScale
+        let bottomMargin = (isTilt ? -40 : -40) * printScale
 
         // Mirrors ExtrudedBigWordText's own internal `pad` (the blank margin
         // it reserves above/below the letters for the extrusion/outline),
@@ -490,6 +498,21 @@ struct GreetingsCaptionView: View {
             // thicken the strokes instead — same trick the hidden Burst
             // caption feature uses for its outline.
             ZStack {
+                // Solid halo behind everything else — a ring of offset
+                // duplicate copies (same principle as a drop shadow cast in
+                // every direction, just with zero blur for a crisp, solid
+                // edge instead of a soft one), colored with the badge's own
+                // background color at a fixed 100% opacity regardless of
+                // backgroundOpacity, so the script stays legible even when
+                // the badge background is faded or .transparent.
+                let borderThickness = g.scriptFontSize * 0.08
+                ForEach(Array(stride(from: 0.0, to: 360.0, by: 15.0)), id: \.self) { angle in
+                    let rad = angle * .pi / 180
+                    Text(scriptText)
+                        .offset(x: cos(rad) * borderThickness, y: sin(rad) * borderThickness)
+                        .foregroundColor(scriptBorderColor)
+                }
+
                 let boldOffset = g.scriptFontSize * 0.012
                 ForEach([CGSize(width: -boldOffset, height: 0), CGSize(width: boldOffset, height: 0),
                          CGSize(width: 0, height: -boldOffset), CGSize(width: 0, height: boldOffset)], id: \.self) { o in
@@ -510,7 +533,14 @@ struct GreetingsCaptionView: View {
                 .rotationEffect(.degrees(-4), anchor: .leading)
                 .offset(y: scriptPull)
                 .padding(.bottom, -scriptPull)
-                .padding(.top, margin)
+                .padding(.top, topMargin)
+                // Longer/smaller big words shrink their own font (to fit the
+                // badge width cap) while scriptPull/bigWordPull stay fixed
+                // pixel amounts — so the same overlap covers proportionally
+                // more of a smaller big word. Rather than re-deriving the
+                // pull as a function of word length, just guarantee the
+                // script always paints on top when they do overlap.
+                .zIndex(1)
 
             ExtrudedBigWordText(
                 text: g.displayWord,
@@ -525,14 +555,19 @@ struct GreetingsCaptionView: View {
                 gradientStripes: preset.gradientStripes
             )
             .padding(.top, 0)
-            .padding(.bottom, isLandscape ? -175 : -155)
+            // Trims ExtrudedBigWordText's own internal bottom pad (bigWordPad,
+            // computed above) — was previously a hardcoded -175/-155 that
+            // didn't scale with bigWordFontSize, so it over-trimmed once a
+            // long word shrunk the font (eating the bottom margin, leaving
+            // the big word flush against the badge's bottom edge). Using
+            // the actual computed pad value scales correctly at any length.
+            .padding(.bottom, -bigWordPad)
             .offset(y: -bigWordPull)
             .padding(.top, -bigWordPull)
         }
         .padding(.horizontal, badgeHPad)
-        .padding(.bottom, margin)
-        .padding(.leading, contentLeadingInset ?? 0)
-        .frame(minWidth: backgroundMinWidth, alignment: contentLeadingInset != nil ? .leading : .center)
+        .padding(.bottom, bottomMargin)
+        .padding(.leading, isTilt ? 10 : 0)
         .background {
             if drawsBackground {
                 Rectangle()
@@ -551,6 +586,7 @@ private struct GreetingsBadgeRenderKey: Equatable {
     let fixedPosition: GreetingsFixedPosition
     let badgeColorChoice: GreetingsBadgeColor
     let scriptColorChoice: GreetingsScriptColor?
+    let haloEnabled: Bool
     let isLandscape: Bool
 }
 
@@ -575,47 +611,72 @@ struct GreetingsCaptionItemView: View {
     private var displayScale: CGFloat { canvasSize.width / referenceWidth }
 
     private var currentKey: GreetingsBadgeRenderKey {
-        GreetingsBadgeRenderKey(word: overlay.word, presetID: overlay.presetID, fixedPosition: overlay.fixedPosition, badgeColorChoice: overlay.badgeColorChoice, scriptColorChoice: overlay.scriptColorChoice, isLandscape: isLandscape)
+        GreetingsBadgeRenderKey(word: overlay.word, presetID: overlay.presetID, fixedPosition: overlay.fixedPosition, badgeColorChoice: overlay.badgeColorChoice, scriptColorChoice: overlay.scriptColorChoice, haloEnabled: overlay.haloEnabled, isLandscape: isLandscape)
     }
 
     // Only used as a placeholder to solve initial placement for the very
     // first frame, before the real bitmap (and its exact size) is ready.
     private var fallbackSize: CGSize {
         let scriptFontSize = GreetingsGeometry.scriptFontSize(isLandscape: isLandscape, scale: 1.0)
-        let bigWordFontSize = GreetingsGeometry.bigWordFontSize(forLetterHeight: 225, maxBadgeWidth: referenceWidth - GreetingsBadgeRenderer.letterEdgeClearance, word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0)
-        let geometry = GreetingsGeometry(word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0)
+        let bigWordFontSize = GreetingsGeometry.bigWordFontSize(forLetterHeight: 225, maxBadgeWidth: referenceWidth - 2 * GreetingsBadgeRenderer.cardEdgeClearance, word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0)
+        let geometry = GreetingsGeometry(word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0, isTilt: overlay.fixedPosition == .left)
         return geometry.estimatedBadgeSize()
     }
 
     var body: some View {
         let printSize = renderedKey == currentKey ? renderedSize : fallbackSize
-        // "Tilt" stretches the badge to a fixed print-scale width — feed
-        // that same width into the position solver so the corner-inset
-        // math lines up with what's actually rendered (the real bitmap's
-        // own width once available). .center/.corner are untouched.
-        // +75 on top of the original 2850/1925 tilt-overshoot width — the
-        // front canvas grew by that same 75px (bleed margin, see
-        // CardRenderer.frontLongSideBleed/frontShortSideBleed) and this
-        // band's overshoot needs to keep pace with it, or its rotated
-        // projection stops covering the new wider/taller canvas edge-to-edge.
-        let badgeSize: CGSize = overlay.fixedPosition == .left
-            ? CGSize(width: isLandscape ? 2925 : 2000, height: printSize.height)
-            : printSize
-        let center = overlay.fixedPosition.center(badgeSize: badgeSize, canvasSize: CGSize(width: referenceWidth, height: referenceWidth * canvasSize.height / canvasSize.width))
+        // Badge now always sizes itself to its true rendered content — Tilt's
+        // clearance from the card's left/right edges is guaranteed by the
+        // rotated-bounding-box math in GreetingsFixedPosition.center(...),
+        // not by artificially widening the badge itself.
+        let center = overlay.fixedPosition.center(badgeSize: printSize, canvasSize: CGSize(width: referenceWidth, height: referenceWidth * canvasSize.height / canvasSize.width))
+        let isTiltPos = overlay.fixedPosition == .left
+        let rotationDeg = overlay.fixedPosition.rotationDegrees(isLandscape: isLandscape)
+        let theta = rotationDeg * .pi / 180
+
+        // Tilt's background "ribbon" is positioned/sized independently of
+        // the text — the text's own `center` (above) is already solved to
+        // guarantee 0.5in clearance from the card's left/right edges (see
+        // GreetingsFixedPosition.center()); the ribbon instead centers
+        // itself on the card's own horizontal midpoint and is widened just
+        // enough that its rotated footprint bleeds off both edges. `t` is
+        // the shift (print-scale, along the ribbon's own rotated axis)
+        // between the two centers — applied as a live `.offset` on the text
+        // image so one shared rotation/position transform serves both.
+        let t: CGFloat = isTiltPos ? (referenceWidth / 2 - center.x) / cos(theta) : 0
+        let ribbonCenter = CGPoint(x: center.x + t * cos(theta), y: center.y + t * sin(theta))
 
         Group {
             if let img = renderedImage, renderedKey == currentKey {
                 let w = renderedSize.width * displayScale
                 let h = renderedSize.height * displayScale
+                // Centered badges get a background that spans the full card
+                // width — the badge content (image) stays its own natural
+                // size, centered within that wider background, rather than
+                // being stretched to fill it. Tilt gets a similarly wide
+                // background (the bleeding ribbon), computed to guarantee
+                // edge-to-edge coverage once rotated.
+                // +150 (0.5in print-scale) overshoot on each side beyond the
+                // exact minimum — the bare-minimum width just barely grazes
+                // the edges with zero margin, vulnerable to rounding;
+                // overshooting is free since the excess is simply clipped
+                // off-canvas.
+                let ribbonWidthPrintScale = (referenceWidth + 300 - renderedSize.height * abs(sin(theta))) / abs(cos(theta))
+                let bgWidth: CGFloat = overlay.fixedPosition == .center
+                    ? canvasSize.width
+                    : (isTiltPos ? ribbonWidthPrintScale * displayScale : w)
                 ZStack {
                     // Live background layer — responds to the opacity
                     // slider instantly, no re-render of the cached bitmap
                     // (which holds only the letters/script) needed.
                     Rectangle().fill(overlay.badgeColorChoice.color.opacity(overlay.backgroundOpacity))
+                        .frame(width: bgWidth, height: h)
                     Image(uiImage: img)
                         .resizable()
+                        .frame(width: w, height: h)
+                        .offset(x: -t * displayScale)
                 }
-                .frame(width: w, height: h)
+                .frame(width: bgWidth, height: h)
             } else {
                 Color.clear.frame(width: 1, height: 1)
             }
@@ -626,8 +687,8 @@ struct GreetingsCaptionItemView: View {
                 .stroke(isSelected ? Color.white : Color.clear, lineWidth: 1.5)
                 .padding(-4)
         )
-        .rotationEffect(Angle(degrees: overlay.fixedPosition.rotationDegrees))
-        .position(x: center.x * displayScale, y: center.y * displayScale)
+        .rotationEffect(Angle(degrees: rotationDeg))
+        .position(x: ribbonCenter.x * displayScale, y: ribbonCenter.y * displayScale)
         .onTapGesture { onSelect() }
         .task(id: currentKey) {
             guard let result = GreetingsBadgeRenderer.render(overlay: overlay, isLandscape: isLandscape) else { return }
@@ -703,6 +764,15 @@ struct GreetingsColorSwatch: View {
 
 struct GreetingsCaptionEditPanel: View {
     @Binding var overlay: GreetingsOverlay
+    // Canvas (photo gap) background color — only really matters for Tilt
+    // (fills the exposed corner instead of showing the back photo layer
+    // there), which is why it lives on this panel rather than a general
+    // Style It control.
+    @Binding var canvasBackgroundColor: CanvasBackgroundColor
+    // Whether the photo gap shows a mirrored reflection of the front
+    // layer's own top edge, or just the plain back layer — only really
+    // visible with Tilt, which is why its toggle sits next to that button.
+    @Binding var photoMirrorEnabled: Bool
     var onDelete: () -> Void
     var onDone: () -> Void
 
@@ -712,17 +782,11 @@ struct GreetingsCaptionEditPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
 
-            // Row 1: "Greetings from" label + word input + script text color swatches
+            // Row 1: "Greetings" label + script text color swatches + Halo
+            // toggle (halo's own color is fixed per swatch — see
+            // GreetingsScriptColor.haloColor — this just turns it on/off).
             HStack(spacing: 8) {
-                Text("Greetings from").font(.caption).foregroundColor(.secondary)
-
-                TextField("Mom, Missouri, Buddy…", text: $overlay.word)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($textFocused)
-                    .onChange(of: overlay.word) { _, new in
-                        if new.count > charLimit { overlay.word = String(new.prefix(charLimit)) }
-                    }
-
+                Text("Greetings").font(.caption).foregroundColor(.secondary)
                 HStack(spacing: 6) {
                     ForEach(GreetingsScriptColor.allCases) { choice in
                         // Nothing is highlighted until the user explicitly
@@ -739,7 +803,27 @@ struct GreetingsCaptionEditPanel: View {
                             )
                             .onTapGesture { overlay.scriptColorChoice = choice }
                     }
+                    Button("Halo") { overlay.haloEnabled.toggle() }
+                        .font(.system(size: 13, weight: .medium))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 16)
+                        .frame(height: 30)
+                        .background(overlay.haloEnabled ? Color.accentColor : Color(.secondarySystemBackground))
+                        .foregroundColor(overlay.haloEnabled ? .white : .primary)
+                        .cornerRadius(999)
                 }
+            }
+
+            // Row 2: "From" label + word input
+            HStack(spacing: 8) {
+                Text("From").font(.caption).foregroundColor(.secondary)
+
+                TextField("Mom, Missouri, Buddy…", text: $overlay.word)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($textFocused)
+                    .onChange(of: overlay.word) { _, new in
+                        if new.count > charLimit { overlay.word = String(new.prefix(charLimit)) }
+                    }
             }
 
             // Row 2: Color Options
@@ -750,16 +834,18 @@ struct GreetingsCaptionEditPanel: View {
                         .onTapGesture {
                             overlay.presetID = preset.id
                             // A new color scheme resets the script color back
-                            // to that scheme's own default until the user
-                            // explicitly picks a swatch again.
-                            overlay.scriptColorChoice = nil
+                            // to the default yellow swatch (kept selected,
+                            // not nil, so halo stays in effect).
+                            overlay.scriptColorChoice = .yellow
                         }
                 }
             }
 
-            // Row 3: Position — 3 mutually exclusive buttons
+            // Row 3: Position — 2 mutually exclusive buttons, the Mirror
+            // toggle (only really visible with Tilt), and the canvas
+            // background color swatches (no label — same reasoning), all
+            // on one line.
             HStack(spacing: 8) {
-                Text("Position").font(.caption).foregroundColor(.secondary)
                 ForEach(GreetingsFixedPosition.allCases, id: \.self) { pos in
                     Button(pos.displayName) { overlay.fixedPosition = pos }
                         .font(.system(size: 13, weight: .medium))
@@ -768,6 +854,39 @@ struct GreetingsCaptionEditPanel: View {
                         .background(overlay.fixedPosition == pos ? Color.accentColor : Color(.secondarySystemBackground))
                         .foregroundColor(overlay.fixedPosition == pos ? .white : .primary)
                         .cornerRadius(999)
+                }
+                Text("Mirror").font(.caption).foregroundColor(.secondary)
+                Button(action: { photoMirrorEnabled.toggle() }) {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .frame(width: 30, height: 30)
+                .background(photoMirrorEnabled ? Color.accentColor : Color(.secondarySystemBackground))
+                .foregroundColor(photoMirrorEnabled ? .white : .primary)
+                .cornerRadius(999)
+                HStack(spacing: 6) {
+                    ForEach(CanvasBackgroundColor.allCases) { choice in
+                        Group {
+                            if choice == .transparent {
+                                // Color.clear has nothing to visibly fill —
+                                // show the "none" icon instead so this
+                                // option is actually visible as a swatch.
+                                Image(systemName: "circle.slash")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 24, height: 24)
+                            } else {
+                                Circle().fill(choice.color)
+                                    .frame(width: 24, height: 24)
+                            }
+                        }
+                        .overlay(
+                            Circle()
+                                .stroke(Color.primary.opacity(canvasBackgroundColor == choice ? 0.8 : 0.15),
+                                        lineWidth: canvasBackgroundColor == choice ? 2.5 : 1)
+                        )
+                        .onTapGesture { canvasBackgroundColor = choice }
+                    }
                 }
             }
 
@@ -780,15 +899,26 @@ struct GreetingsCaptionEditPanel: View {
                 Slider(value: $overlay.backgroundOpacity, in: 0...1)
                 HStack(spacing: 6) {
                     ForEach(GreetingsBadgeColor.allCases) { choice in
-                        Circle()
-                            .fill(choice.color)
-                            .frame(width: 24, height: 24)
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.primary.opacity(overlay.badgeColorChoice == choice ? 0.8 : 0.15),
-                                            lineWidth: overlay.badgeColorChoice == choice ? 2.5 : 1)
-                            )
-                            .onTapGesture { overlay.badgeColorChoice = choice }
+                        Group {
+                            if choice == .transparent {
+                                // Color.clear has nothing to visibly fill —
+                                // show the "none" icon instead so this
+                                // option is actually visible as a swatch.
+                                Image(systemName: "circle.slash")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 24, height: 24)
+                            } else {
+                                Circle().fill(choice.color)
+                                    .frame(width: 24, height: 24)
+                            }
+                        }
+                        .overlay(
+                            Circle()
+                                .stroke(Color.primary.opacity(overlay.badgeColorChoice == choice ? 0.8 : 0.15),
+                                        lineWidth: overlay.badgeColorChoice == choice ? 2.5 : 1)
+                        )
+                        .onTapGesture { overlay.badgeColorChoice = choice }
                     }
                 }
             }

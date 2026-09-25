@@ -173,6 +173,8 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
     var imageOffsetHeight: Double
     var filterRawValue: String
     var borderStyle: String
+    var canvasBackgroundColorRaw: String?  // Optional for backward-compatible decode
+    var photoMirrorEnabled: Bool?          // Optional for backward-compatible decode
     var borderText: String
     var borderFontName: String
     var borderTextR, borderTextG, borderTextB: Double
@@ -246,6 +248,8 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
         imageOffsetHeight      = Double(draft.imageOffset.height)
         filterRawValue         = draft.filter.rawValue
         borderStyle    = draft.border.rawValue
+        canvasBackgroundColorRaw = draft.canvasBackgroundColor.rawValue
+        photoMirrorEnabled = draft.photoMirrorEnabled
         borderText     = draft.borderText
         borderFontName = draft.borderFontName
         var bR: CGFloat = 0, bG: CGFloat = 0, bB: CGFloat = 0, bA: CGFloat = 0
@@ -306,6 +310,8 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
         d.filter         = PostcardFilter(rawValue: filterRawValue) ?? .none
         d.decorativePresetID = decorativePresetID
         d.border          = PostcardBorder(rawValue: borderStyle) ?? .fullBleed
+        d.canvasBackgroundColor = CanvasBackgroundColor(rawValue: canvasBackgroundColorRaw ?? "") ?? .white
+        d.photoMirrorEnabled = photoMirrorEnabled ?? true
         d.borderText      = borderText
         d.borderFontName  = borderFontName
         d.borderTextColor = Color(red: borderTextR, green: borderTextG, blue: borderTextB)
@@ -358,8 +364,7 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
         case 1:  return "Styling it"
         case 2:  return "Writing card"
         case 3:  return "Invisible Ink"
-        case 4:  return "Addresses"
-        case 5:  return "Ready to send"
+        case 4:  return "Ready to send"
         default: return "In progress"
         }
     }

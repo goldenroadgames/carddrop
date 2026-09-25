@@ -90,7 +90,7 @@ class AuthManager: ObservableObject {
         if isAnonymous || !isEmailVerified {
             let configKey = isAnonymous ? "send_limit_anonymous_monthly" : "send_limit_unverified_monthly"
             if let configRow = try? await supabase
-                .from("config")
+                .from("zz_config")
                 .select("value")
                 .eq("key", value: configKey)
                 .single()
@@ -145,6 +145,34 @@ class AuthManager: ObservableObject {
                 "country":    .string(country)
             ]
             _ = try? await supabase.from("users").upsert(row, onConflict: "id").execute()
+
+            // Also keep user_address_book's "profile" row in sync — that's
+            // what the physical-mail send flow's sender picker reads to
+            // prefill a default return address (see
+            // project_lob_integration_progress). The users-table columns
+            // above are legacy/unrelated to that flow.
+            guard !street.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            let profileAddress = SavedMailingAddress(
+                id: UUID(),
+                nickname: nil,
+                firstName: firstName.isEmpty ? nil : firstName,
+                lastName: lastName.isEmpty ? nil : lastName,
+                street: street,
+                city: city,
+                state: state,
+                zip: zip,
+                country: country.isEmpty ? "US" : country,
+                email: nil,
+                phone: phone.isEmpty ? nil : phone,
+                addressType: .profile,
+                isVerified: false,
+                verifiedAt: nil,
+                lobVerificationID: nil,
+                lastUsedAt: Date()
+            )
+            if let saved = try? await AddressBookService.save(profileAddress, existing: nil), !saved.isVerified {
+                _ = try? await AddressBookService.verify(id: saved.id)
+            }
         }
     }
 

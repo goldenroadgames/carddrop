@@ -1,5 +1,4 @@
 import SwiftUI
-import PhotosUI
 
 // Minimum pixel dimensions for acceptable print quality on a 6x9 postcard at ~200 DPI.
 // 300 DPI ideal = 1800×2700; we warn below that but still allow proceeding.
@@ -18,10 +17,10 @@ private let minPrintPixelsShort: CGFloat = 1200  // short side
 // Style It) because no text overlay can exist yet this early in the flow.
 struct ChoosePhotoStepView: View {
     @ObservedObject var draft: PostcardDraft
-    @Binding var photoItem: PhotosPickerItem?
     var onNext: () -> Void
 
     @State private var isPickerPresented = false
+    @State private var isCameraPresented = false
     @State private var isModerating = false
     @State private var pendingLowResImage: UIImage? = nil
     @State private var showLowResAlert = false
@@ -51,6 +50,10 @@ struct ChoosePhotoStepView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if draft.image == nil {
+                takePhotoSection
+            }
+
             if draft.image != nil {
                 fromToRow
                 Divider()
@@ -152,6 +155,14 @@ struct ChoosePhotoStepView: View {
             rerenderComposedImage()
             updateCachedFilteredImage()
             updateFilterThumbnailsIfNeeded()
+            // Auto-open the library picker the first time this step is
+            // reached with no photo yet — safe to do now (unlike before
+            // takePhotoSection existed) because the picker sheet stops at
+            // .fraction(0.85), leaving "Take a Photo"/"Choose Photo" above
+            // it visible and tappable if the user dismisses without picking.
+            if draft.image == nil {
+                isPickerPresented = true
+            }
         }
         .task {
             if draft.senderNickname.isEmpty, let saved = await UserService.fetchSenderNickname(), !saved.isEmpty {
@@ -171,12 +182,69 @@ struct ChoosePhotoStepView: View {
             updateFilterThumbnailsIfNeeded(newImage)
             updateCachedFilteredImage(newImage)
         }
-        .photoPickingPipeline(
-            draft: draft, photoItem: $photoItem, isPickerPresented: $isPickerPresented,
-            isModerating: $isModerating, pendingLowResImage: $pendingLowResImage,
-            showLowResAlert: $showLowResAlert, flaggedCategories: $flaggedCategories,
-            showModerationAlert: $showModerationAlert
-        )
+        .sheet(isPresented: $isPickerPresented) {
+            PhotoLibraryPickerView(
+                onPick: { image in
+                    isPickerPresented = false
+                    handlePicked(image: image)
+                },
+                onCancel: { isPickerPresented = false }
+            )
+            .presentationDetents([.fraction(0.86)])
+            .presentationBackgroundInteraction(.enabled)
+            .ignoresSafeArea()
+        }
+        .alert("Photo May Print Blurry", isPresented: $showLowResAlert) {
+            Button("Use Anyway") {
+                draft.image = pendingLowResImage
+                pendingLowResImage = nil
+            }
+            Button("Choose Different Photo", role: .cancel) {
+                pendingLowResImage = nil
+                isPickerPresented = true
+            }
+        } message: {
+            Text("This photo is lower resolution than recommended for a postcard and may not print as sharply as you'd like.")
+        }
+        .alert("Photo Not Allowed", isPresented: $showModerationAlert) {
+            Button("Choose a Different Photo", role: .cancel) { isPickerPresented = true }
+        } message: {
+            Text("That photo was flagged for: \(flaggedCategories.joined(separator: ", ")). Please choose a different photo.")
+        }
+    }
+
+    // Shared entry point for a picked image, whichever source it came from
+    // (library or camera) — runs moderation + low-res checks, same as
+    // before this became a two-source flow.
+    private func handlePicked(image: UIImage) {
+        Task {
+            isModerating = true
+            let result = await ModerationService.check(image: image)
+            isModerating = false
+
+            switch result {
+            case .flagged(let categories):
+                flaggedCategories = categories
+                showModerationAlert = true
+                return
+            case .clean:
+                break
+            }
+
+            let pixelWidth  = image.size.width  * image.scale
+            let pixelHeight = image.size.height * image.scale
+            let longSide    = max(pixelWidth, pixelHeight)
+            let shortSide   = min(pixelWidth, pixelHeight)
+            if longSide < minPrintPixels || shortSide < minPrintPixelsShort {
+                pendingLowResImage = image
+                showLowResAlert = true
+                return
+            }
+
+            draft.image = image
+            draft.imageScale = 1.0
+            draft.imageOffset = .zero
+        }
     }
 
     // Pinch/drag hint, the photo canvas itself, and "Choose a Different
@@ -386,6 +454,68 @@ struct ChoosePhotoStepView: View {
         }
     }
 
+    // Pinned above the rest of the VStack, only while no photo is chosen —
+    // collapses to zero height (same gating as every other section here)
+    // once draft.image is set. The library picker below it is a custom
+    // PHPicker wrapper presented at .fraction(0.87) specifically so it
+    // never covers this section — see PhotoLibraryPickerView.swift.
+    @ViewBuilder
+    private var takePhotoSection: some View {
+        VStack(spacing: 8) {
+            Button {
+                // Single press regardless of the library sheet's state: if
+                // it's open, close it first (they're not meant to stack),
+                // then open the camera either way.
+                isPickerPresented = false
+                isCameraPresented = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "camera.fill")
+                    Text("Take a Photo")
+                }
+                .font(.system(size: 17, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(isModerating ? Color.gray : Color.brandBlue)
+                .foregroundColor(.white)
+                .cornerRadius(999)
+            }
+            // Simulator has no camera — UIImagePickerController silently
+            // fails to present rather than erroring, so guard it here
+            // instead.
+            .disabled(isModerating || !CameraCaptureView.isAvailable)
+
+            Button {
+                isPickerPresented = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                    Text("Choose Photo")
+                }
+                .font(.system(size: 17, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(isModerating ? Color.gray : Color.brandBlue)
+                .foregroundColor(.white)
+                .cornerRadius(999)
+            }
+            .disabled(isModerating)
+            .opacity(isPickerPresented ? 0 : 1)
+        }
+        .padding(.horizontal)
+        .padding(.top, 41)
+        .fullScreenCover(isPresented: $isCameraPresented) {
+            CameraCaptureView(
+                onCapture: { image in
+                    isCameraPresented = false
+                    handlePicked(image: image)
+                },
+                onCancel: { isCameraPresented = false }
+            )
+            .ignoresSafeArea()
+        }
+    }
+
     @ViewBuilder
     private var emptyPhotoState: some View {
         VStack(spacing: 16) {
@@ -403,19 +533,6 @@ struct ChoosePhotoStepView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
-            Button {
-                isPickerPresented = true
-            } label: {
-                Text("Choose Photo")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(isModerating ? Color.gray : Color.brandBlue)
-                    .foregroundColor(.white)
-                    .cornerRadius(999)
-            }
-            .disabled(isModerating)
-            .padding(.horizontal)
             Spacer()
         }
     }
@@ -522,101 +639,6 @@ struct ChoosePhotoStepView: View {
     }
 }
 
-// MARK: - Photo Picking Pipeline
-//
-// Extracted as its own ViewModifier — see TextOverlayStepView.swift's
-// history for why (SourceKit/type-checker strain on long modifier chains).
-private struct PhotoPickingPipeline: ViewModifier {
-    @ObservedObject var draft: PostcardDraft
-    @Binding var photoItem: PhotosPickerItem?
-    @Binding var isPickerPresented: Bool
-    @Binding var isModerating: Bool
-    @Binding var pendingLowResImage: UIImage?
-    @Binding var showLowResAlert: Bool
-    @Binding var flaggedCategories: [String]
-    @Binding var showModerationAlert: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .photosPicker(isPresented: $isPickerPresented, selection: $photoItem, matching: .images)
-            .task {
-                if draft.image == nil { isPickerPresented = true }
-            }
-            .onChange(of: photoItem) { _, newItem in
-                Task {
-                    guard let data = try? await newItem?.loadTransferable(type: Data.self),
-                          let image = UIImage(data: data) else { return }
-
-                    isModerating = true
-                    let result = await ModerationService.check(image: image)
-                    isModerating = false
-
-                    switch result {
-                    case .flagged(let categories):
-                        flaggedCategories = categories
-                        showModerationAlert = true
-                        photoItem = nil
-                        return
-                    case .clean:
-                        break
-                    }
-
-                    let pixelWidth  = image.size.width  * image.scale
-                    let pixelHeight = image.size.height * image.scale
-                    let longSide    = max(pixelWidth, pixelHeight)
-                    let shortSide   = min(pixelWidth, pixelHeight)
-                    if longSide < minPrintPixels || shortSide < minPrintPixelsShort {
-                        pendingLowResImage = image
-                        showLowResAlert = true
-                        return
-                    }
-
-                    draft.image = image
-                    draft.imageScale = 1.0
-                    draft.imageOffset = .zero
-                }
-            }
-            .alert("Photo May Print Blurry", isPresented: $showLowResAlert) {
-                Button("Use Anyway") {
-                    draft.image = pendingLowResImage
-                    pendingLowResImage = nil
-                }
-                Button("Choose Different Photo", role: .cancel) {
-                    pendingLowResImage = nil
-                    photoItem = nil
-                    isPickerPresented = true
-                }
-            } message: {
-                Text("This photo is lower resolution than recommended for a postcard and may not print as sharply as you'd like.")
-            }
-            .alert("Photo Not Allowed", isPresented: $showModerationAlert) {
-                Button("Choose a Different Photo", role: .cancel) { isPickerPresented = true }
-            } message: {
-                Text("That photo was flagged for: \(flaggedCategories.joined(separator: ", ")). Please choose a different photo.")
-            }
-    }
-}
-
-private extension View {
-    func photoPickingPipeline(
-        draft: PostcardDraft,
-        photoItem: Binding<PhotosPickerItem?>,
-        isPickerPresented: Binding<Bool>,
-        isModerating: Binding<Bool>,
-        pendingLowResImage: Binding<UIImage?>,
-        showLowResAlert: Binding<Bool>,
-        flaggedCategories: Binding<[String]>,
-        showModerationAlert: Binding<Bool>
-    ) -> some View {
-        modifier(PhotoPickingPipeline(
-            draft: draft, photoItem: photoItem, isPickerPresented: isPickerPresented,
-            isModerating: isModerating, pendingLowResImage: pendingLowResImage,
-            showLowResAlert: showLowResAlert, flaggedCategories: flaggedCategories,
-            showModerationAlert: showModerationAlert
-        ))
-    }
-}
-
 // MARK: - Sliding Toggle  (2-option pill with an animated blue thumb that
 // slides to the selected side — used for Orientation and Border. Not
 // .pickerStyle(.segmented): a native segmented control has its own fixed
@@ -655,6 +677,6 @@ private struct SlidingTogglePill<T: Hashable>: View {
 }
 
 #Preview {
-    ChoosePhotoStepView(draft: PostcardDraft(), photoItem: .constant(nil), onNext: {})
+    ChoosePhotoStepView(draft: PostcardDraft(), onNext: {})
         .environmentObject(AppSettings())
 }

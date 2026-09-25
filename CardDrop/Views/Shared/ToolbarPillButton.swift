@@ -18,6 +18,10 @@ struct ToolbarPillButton: View {
     enum Style {
         case pill
         case bare
+        // Solid brandBlue capsule, white text — same look as the bottom
+        // "Next: ..." step buttons, for a toolbar action that should read
+        // as more prominent than the standard gray .pill.
+        case filled
     }
 
     let title: String
@@ -46,6 +50,18 @@ struct ToolbarPillButton: View {
                     // width the system proposes to a leading toolbar item
                     // next to a wide centered title — force it to lay out
                     // at its full intrinsic width instead of shrinking.
+                    .fixedSize()
+            case .filled:
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(isDisabled ? 0.6 : 1))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.brandBlue)
+                    .clipShape(Capsule())
+                    // Same reasoning as .bare above — guarantee full width
+                    // so "Cancel" can't get squeezed down to a single letter
+                    // next to a wide centered title.
                     .fixedSize()
             }
         }

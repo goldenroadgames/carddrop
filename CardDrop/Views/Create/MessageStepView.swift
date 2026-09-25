@@ -174,7 +174,7 @@ struct MessageStepView: View {
                         if isModerating {
                             ProgressView().tint(.white)
                         } else {
-                            Text("Next: Addresses")
+                            Text("Next: Preview and Send")
                                 .font(.system(size: 17, weight: .semibold))
                         }
                     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import CoreImage.CIFilterBuiltins
 
 // MARK: - Step View
@@ -126,6 +127,10 @@ struct TextOverlayStepView: View {
             // restored imageScale/imageOffset so a reopened draft's
             // Preview/print matches its Style It position right away, not
             // only after the user re-adjusts the photo.
+            // Also re-clamps to the safe zone — covers drafts saved before
+            // this constraint existed, or with a Greetings badge added/
+            // repositioned since the photo was last adjusted.
+            clampPhotoToSafeZone(imgSize: lastImgSize)
             rerenderComposedImage()
         }
         .onChange(of: draft.filter) { _, _ in updateCachedFilteredImage() }
@@ -190,16 +195,76 @@ struct TextOverlayStepView: View {
                     (draft.border == .whiteBorder || draft.border == .decorative) ? Color.white : Color.black
 
                     ZStack {
-                        // Directly behind the photo itself (independent of
-                        // the outer white-border backdrop above) — if a
-                        // drag/zoom leaves part of imgSize uncovered, that
-                        // gap must read as this color, not whatever the
-                        // border color happens to be, matching
-                        // PostcardDraft.rendered(at:)'s baked output exactly:
-                        // opaque white, or the Greetings badge's own
-                        // background color when one is present.
-                        (draft.greetingsOverlays.first?.badgeColorChoice.color ?? .white)
+                        if let img = cachedFilteredImage {
+                            // Back layer: same photo, floored at "just
+                            // covers the canvas" — zooms in together with
+                            // the front layer past that floor, but never
+                            // lets it zoom out below full coverage.
+                            // Guarantees every corner (e.g. the top-left,
+                            // under a tilted Greetings badge) always shows
+                            // real photo content instead of the plain
+                            // background color, no matter how the front
+                            // layer is panned/zoomed. X position is locked
+                            // to the front layer's own horizontal pan (moves
+                            // in unison) so wherever the back layer peeks
+                            // through, it's horizontally aligned with the
+                            // front layer's content rather than showing a
+                            // different part of the photo — Y stays fixed/
+                            // centered regardless of vertical pan, since
+                            // that's what guarantees top/bottom coverage
+                            // under the banner. Matches PostcardDraft.
+                            // rendered(at:)'s baked output.
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: imgSize.width, height: imgSize.height)
+                                .scaleEffect(max(1.0, draft.imageScale * gestureScale))
+                                .offset(x: draft.imageOffset.width * imgSize.width + gestureDrag.width, y: 0)
+                                .clipped()
+                                .allowsHitTesting(false)
+                        }
+
+                        if draft.photoMirrorEnabled, let img = cachedFilteredImage, let imageSize = draft.image?.size,
+                           imageSize.width > 0, imageSize.height > 0, imgSize.width > 0, imgSize.height > 0 {
+                            // Mirror layer (user-toggleable): a vertically-flipped duplicate of
+                            // the front layer's own content, anchored so its
+                            // bottom edge touches the front layer's actual
+                            // top edge — continues the photo as a seamless
+                            // reflection into the gap above, instead of the
+                            // back layer's independently-cropped (different
+                            // part of the photo) view. Same scale/X-offset
+                            // as the front layer, so it lines up exactly at
+                            // the seam; only the flip and Y position differ.
+                            // The back layer above still shows through
+                            // beyond the mirror's own extent (a real edge
+                            // case only, in extreme zoom-out).
+                            let fillScale = max(imgSize.width / imageSize.width, imgSize.height / imageSize.height)
+                            let totalScale = fillScale * draft.imageScale * gestureScale
+                            let scaledHeight = imageSize.height * totalScale
+                            let frontOffsetY = draft.imageOffset.height * imgSize.height + gestureDrag.height
+                            let offsetX = draft.imageOffset.width * imgSize.width + gestureDrag.width
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: imgSize.width, height: imgSize.height)
+                                .scaleEffect(x: draft.imageScale * gestureScale, y: -(draft.imageScale * gestureScale))
+                                .offset(x: offsetX, y: frontOffsetY - scaledHeight)
+                                .clipped()
+                                .allowsHitTesting(false)
+                        }
+
+                        // Directly in front of the back photo layer — if a
+                        // drag/zoom leaves part of imgSize uncovered, this
+                        // fills that gap with the user's chosen solid color
+                        // instead (default .transparent, leaving the back
+                        // photo layer above visible as-is), matching
+                        // PostcardDraft.rendered(at:)'s baked output exactly.
+                        // Any translucent overlay drawn later (e.g. a
+                        // Greetings badge) blends with whichever of these
+                        // two is actually showing through.
+                        draft.canvasBackgroundColor.color
                             .frame(width: imgSize.width, height: imgSize.height)
+                            .allowsHitTesting(false)
 
                         if let img = cachedFilteredImage {
                             // Live pinch/drag preview — full absolute
@@ -256,18 +321,18 @@ struct TextOverlayStepView: View {
                                     MagnificationGesture()
                                         .updating($gestureScale) { value, state, _ in state = value }
                                         .onEnded { value in
-                                            // No lower clamp at 1.0 — zooming
-                                            // out smaller than "fill" is
-                                            // allowed; the resulting gap
-                                            // around the photo is handled by
-                                            // a solid backdrop fill, both in
-                                            // this live preview and in the
-                                            // real print bake (PostcardDraft.
-                                            // rendered(at:)). Only floors at
-                                            // a small positive value so the
-                                            // photo can never invert/collapse
-                                            // to zero.
+                                            // No fixed lower clamp at 1.0 —
+                                            // zooming out smaller than "fill"
+                                            // is allowed in general (the
+                                            // back photo layer + backdrop
+                                            // fill handle any resulting gap)
+                                            // but clampPhotoToSafeZone below
+                                            // still enforces the front layer
+                                            // can't leave a gap anywhere
+                                            // except behind the Greetings
+                                            // banner (if present).
                                             draft.imageScale = max(0.1, draft.imageScale * value)
+                                            clampPhotoToSafeZone(imgSize: imgSize)
                                             rerenderComposedImage()
                                         },
                                     DragGesture()
@@ -278,6 +343,7 @@ struct TextOverlayStepView: View {
                                             // draft.imageOffset stays canvas-size-independent.
                                             draft.imageOffset.width += value.translation.width / imgSize.width
                                             draft.imageOffset.height += value.translation.height / imgSize.height
+                                            clampPhotoToSafeZone(imgSize: imgSize)
                                             rerenderComposedImage()
                                         }
                                 )
@@ -365,6 +431,7 @@ struct TextOverlayStepView: View {
                                     }
                                 ),
                                 canvasSize: imgSize,
+                                printCanvasSize: printCanvasSize,
                                 isSelected: selectedQRIndex == draft.qrOverlays.firstIndex(where: { $0.id == overlay.id }),
                                 onSelect: {
                                     selectedQRIndex = draft.qrOverlays.firstIndex(where: { $0.id == overlay.id })
@@ -414,7 +481,7 @@ struct TextOverlayStepView: View {
                         .foregroundColor(.primary)
                         .themedSurface(appSettings.uiTheme, cornerRadius: 999)
                 }
-                Button(action: { addGreetingsOverlay() }) {
+                Button(action: { addGreetingsOverlay(imgSize: imgSize) }) {
                     Label("Greetings", systemImage: "text.badge.star")
                         .font(.system(size: 17, weight: .regular))
                         .frame(maxWidth: .infinity)
@@ -490,6 +557,50 @@ struct TextOverlayStepView: View {
         draft.renderComposedImage(frameSize: imageAreaSize(in: referenceSize))
     }
 
+    // Guarantees the front photo layer never leaves a gap anywhere except
+    // behind the Greetings banner (if present) — full width always, full
+    // height from canvas bottom up to either the canvas top (no banner) or
+    // the banner's own bottom edge (see GreetingsOverlay.safeZoneTopFraction).
+    // Raises imageScale to the minimum needed, then clamps imageOffset so
+    // the resulting draw rect actually covers that safe zone. Called at the
+    // end of every pinch/drag gesture, whenever a Greetings badge is added
+    // (which can shrink the safe zone under an already-positioned photo),
+    // and on appear (for drafts saved before this constraint existed).
+    private func clampPhotoToSafeZone(imgSize: CGSize) {
+        guard let imageSize = draft.image?.size,
+              imageSize.width > 0, imageSize.height > 0,
+              imgSize.width > 0, imgSize.height > 0
+        else { return }
+
+        let isLandscape = draft.orientation == .landscape
+        let safeTopFraction = GreetingsOverlay.safeZoneTopFraction(for: draft.greetingsOverlays, isLandscape: isLandscape)
+        let safeTopY = safeTopFraction * imgSize.height
+        let requiredHeight = imgSize.height - safeTopY
+
+        let fillScale = max(imgSize.width / imageSize.width, imgSize.height / imageSize.height)
+        let minTotalScale = max(imgSize.width / imageSize.width, requiredHeight / imageSize.height)
+        let minImageScale = minTotalScale / fillScale
+        if draft.imageScale < minImageScale {
+            draft.imageScale = minImageScale
+        }
+
+        let totalScale = fillScale * draft.imageScale
+        let scaledWidth = imageSize.width * totalScale
+        let scaledHeight = imageSize.height * totalScale
+
+        var originX = (imgSize.width - scaledWidth) / 2 + draft.imageOffset.width * imgSize.width
+        var originY = (imgSize.height - scaledHeight) / 2 + draft.imageOffset.height * imgSize.height
+
+        // Left/right: always full canvas width, regardless of the banner.
+        originX = min(0, max(imgSize.width - scaledWidth, originX))
+        // Top/bottom: full canvas bottom up to the safe zone's top edge —
+        // gaps are only tolerated above that line (behind the banner).
+        originY = min(safeTopY, max(imgSize.height - scaledHeight, originY))
+
+        draft.imageOffset.width  = (originX - (imgSize.width - scaledWidth) / 2) / imgSize.width
+        draft.imageOffset.height = (originY - (imgSize.height - scaledHeight) / 2) / imgSize.height
+    }
+
     private func updateCachedFilteredImage(_ overrideImage: UIImage? = nil) {
         guard let base = overrideImage ?? draft.image else { return }
         cachedFilteredImage = draft.filter.apply(to: base)
@@ -514,6 +625,7 @@ struct TextOverlayStepView: View {
                     set: { if draft.qrOverlays.indices.contains(idx) { draft.qrOverlays[idx] = $0 } }
                 ),
                 canvasSize: imgSize,
+                printCanvasSize: printCanvasSize,
                 onDelete: { draft.qrOverlays.remove(at: idx); selectedQRIndex = nil },
                 onDone: { selectedQRIndex = nil }
             )
@@ -532,6 +644,8 @@ struct TextOverlayStepView: View {
                     get: { draft.greetingsOverlays.indices.contains(idx) ? draft.greetingsOverlays[idx] : GreetingsOverlay() },
                     set: { if draft.greetingsOverlays.indices.contains(idx) { draft.greetingsOverlays[idx] = $0 } }
                 ),
+                canvasBackgroundColor: $draft.canvasBackgroundColor,
+                photoMirrorEnabled: $draft.photoMirrorEnabled,
                 onDelete: { draft.greetingsOverlays.remove(at: idx); selectedGreetingsIndex = nil },
                 onDone: { selectedGreetingsIndex = nil }
             )
@@ -559,11 +673,15 @@ struct TextOverlayStepView: View {
 
     // Only one Greetings badge is allowed per card — if one already exists,
     // tapping the control edits it instead of creating a second.
-    private func addGreetingsOverlay() {
+    private func addGreetingsOverlay(imgSize: CGSize) {
         if draft.greetingsOverlays.isEmpty {
             var overlay = GreetingsOverlay()
             overlay.word = draft.senderNickname
             draft.greetingsOverlays.append(overlay)
+            // A new banner can shrink the safe zone under an
+            // already-positioned photo — re-clamp immediately.
+            clampPhotoToSafeZone(imgSize: imgSize)
+            rerenderComposedImage()
         }
         selectedGreetingsIndex = 0
         selectedIndex = nil
@@ -656,7 +774,7 @@ struct TextOverlayItemView: View {
     let printCanvasSize: CGSize
     let onSelect: () -> Void
 
-    @GestureState private var dragOffset: CGSize = .zero
+    @GestureState private var liveDragPosition: CGPoint? = nil
 
     // Lays the bubble out at the SAME absolute point size the print bake
     // will use (TextOverlayBubbleView), then scales the whole result back
@@ -670,7 +788,96 @@ struct TextOverlayItemView: View {
         printCanvasSize.width > 0 ? canvasSize.width / printCanvasSize.width : 1
     }
 
+    // The front print canvas is always baked at a fixed 300 DPI (see
+    // CardRenderer.frontLongSideBleed / frontShortSideBleed), so 3/8" is a
+    // constant number of print-canvas points regardless of orientation or
+    // border style; converting through displayScale lands it in editor
+    // points without needing to know the physical card size here.
+    private var safeInset: CGFloat {
+        (0.375 * 300) * displayScale
+    }
+
+    // The bubble's true footprint (box/speech/thought background + padding,
+    // not just the text glyphs), at the same print-canvas scale
+    // TextOverlayBubbleView itself lays out at (fontScale/boxWidth). This is
+    // computed analytically — mirroring TextOverlayBubbleView's own padding
+    // math exactly — rather than measured live via GeometryReader, because a
+    // GeometryReader/PreferenceKey round-trip lags a render cycle behind the
+    // drag and was leaving the clamp using a stale/zero size, letting the
+    // visible box cross the boundary while only the text (near the center
+    // point) stayed inside.
+    private var containerSize: CGSize {
+        let boxWidth = overlay.normalizedWidth * printCanvasSize.width
+        let scaledFontSize = min(overlay.fontSize, 36) * fontScale
+        let uiFont = UIFont(name: overlay.resolvedFontName, size: scaledFontSize)
+            ?? UIFont.systemFont(ofSize: scaledFontSize)
+
+        let basePadH: CGFloat
+        let basePadV: CGFloat
+        switch overlay.bgStyle {
+        case .thought:      basePadH = 2 * fontScale;  basePadV = 2 * fontScale
+        case .box, .speech: basePadH = 12 * fontScale; basePadV = 12 * fontScale
+        case .none:         basePadH = 5 * fontScale;  basePadV = 4 * fontScale
+        }
+        let cloudExtra: CGFloat = (overlay.bgStyle == .thought ? 2 : 0) * fontScale
+        let tailHeight: CGFloat
+        switch overlay.bgStyle {
+        case .speech:  tailHeight = SpeechBubbleShape.tailHeight(scale: fontScale)
+        case .thought: tailHeight = ThoughtBubbleShape.tailHeight(scale: fontScale)
+        default:       tailHeight = 0
+        }
+
+        let displayText = overlay.text.isEmpty ? " " : overlay.text
+        let bounding = (displayText as NSString).boundingRect(
+            with: CGSize(width: boxWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: uiFont],
+            context: nil
+        )
+
+        return CGSize(
+            width:  boxWidth + 2 * (basePadH + cloudExtra),
+            height: ceil(bounding.height) + 2 * (basePadV + cloudExtra) + tailHeight
+        )
+    }
+
+    // Hard-stops `proposed` (an absolute center point in canvasSize's
+    // coordinate space) so the bubble's true, rotated edge never crosses the
+    // 3/8" safe boundary. Called live on every drag frame, not just on
+    // release, so the object physically can't be dragged past the line.
+    private func clamped(_ proposed: CGPoint) -> CGPoint {
+        guard canvasSize.width > 0, canvasSize.height > 0 else { return proposed }
+
+        // containerSize is at print-canvas scale (same space TextOverlayBubbleView
+        // itself lays out at), so it must be scaled by displayScale here to
+        // get the actual on-screen size.
+        let rad = CGFloat(overlay.rotation) * .pi / 180
+        let size = containerSize
+        let halfW = (size.width  * displayScale) / 2
+        let halfH = (size.height * displayScale) / 2
+        let boundHalfW = abs(halfW * cos(rad)) + abs(halfH * sin(rad))
+        let boundHalfH = abs(halfW * sin(rad)) + abs(halfH * cos(rad))
+
+        let minX = safeInset + boundHalfW
+        let maxX = canvasSize.width - safeInset - boundHalfW
+        let minY = safeInset + boundHalfH
+        let maxY = canvasSize.height - safeInset - boundHalfH
+
+        // If the bubble is too big to fit within the boundary on an axis,
+        // just center it on that axis instead of leaving it stuck against
+        // one side.
+        return CGPoint(
+            x: minX <= maxX ? max(minX, min(maxX, proposed.x)) : canvasSize.width / 2,
+            y: minY <= maxY ? max(minY, min(maxY, proposed.y)) : canvasSize.height / 2
+        )
+    }
+
     var body: some View {
+        let displayPosition = liveDragPosition ?? CGPoint(
+            x: overlay.normalizedPosition.x * canvasSize.width,
+            y: overlay.normalizedPosition.y * canvasSize.height
+        )
+
         TextOverlayBubbleView(
             overlay: overlay,
             scale: fontScale,
@@ -678,23 +885,26 @@ struct TextOverlayItemView: View {
         )
         .scaleEffect(displayScale)
         .rotationEffect(Angle(degrees: overlay.rotation))
-        .position(
-            x: overlay.normalizedPosition.x * canvasSize.width  + dragOffset.width,
-            y: overlay.normalizedPosition.y * canvasSize.height + dragOffset.height
-        )
+        .position(x: displayPosition.x, y: displayPosition.y)
         .gesture(
             DragGesture()
-                .updating($dragOffset) { value, state, _ in
-                    state = value.translation
+                .updating($liveDragPosition) { value, state, _ in
+                    let proposed = CGPoint(
+                        x: overlay.normalizedPosition.x * canvasSize.width  + value.translation.width,
+                        y: overlay.normalizedPosition.y * canvasSize.height + value.translation.height
+                    )
+                    state = clamped(proposed)
                 }
                 .onEnded { value in
                     guard canvasSize.width > 0, canvasSize.height > 0 else { return }
-                    let nx = overlay.normalizedPosition.x + value.translation.width  / canvasSize.width
-                    let ny = overlay.normalizedPosition.y + value.translation.height / canvasSize.height
-                    // Allow center to reach the edge (clipped at image boundary by parent)
+                    let proposed = CGPoint(
+                        x: overlay.normalizedPosition.x * canvasSize.width  + value.translation.width,
+                        y: overlay.normalizedPosition.y * canvasSize.height + value.translation.height
+                    )
+                    let result = clamped(proposed)
                     overlay.normalizedPosition = CGPoint(
-                        x: max(0, min(1, nx)),
-                        y: max(0, min(1, ny))
+                        x: result.x / canvasSize.width,
+                        y: result.y / canvasSize.height
                     )
                 }
         )
@@ -722,6 +932,7 @@ struct TextOverlayEditPanel: View {
     }
 
     var body: some View {
+
         VStack(alignment: .leading, spacing: 10) {
 
             // Row 1: Full-width text box with char cap
@@ -909,6 +1120,7 @@ struct TextOverlayEditPanel: View {
 struct QROverlayItemView: View {
     @Binding var overlay: QROverlay
     let canvasSize: CGSize
+    let printCanvasSize: CGSize
     let isSelected: Bool
     let onSelect: () -> Void
 
@@ -952,7 +1164,7 @@ struct QROverlayItemView: View {
                     let ny = overlay.normalizedPosition.y + value.translation.height / canvasSize.height
                     var updated = overlay
                     updated.normalizedPosition = CGPoint(x: max(0, min(1, nx)), y: max(0, min(1, ny)))
-                    updated.snapToNearestCorner(canvasSize: canvasSize)
+                    updated.snapToNearestCorner(canvasSize: canvasSize, printCanvasSize: printCanvasSize)
                     overlay = updated
                 }
         )
@@ -961,7 +1173,7 @@ struct QROverlayItemView: View {
         .onAppear {
             guard canvasSize.width > 0, canvasSize.height > 0 else { generateQR(); return }
             var updated = overlay
-            updated.snapToNearestCorner(canvasSize: canvasSize)
+            updated.snapToNearestCorner(canvasSize: canvasSize, printCanvasSize: printCanvasSize)
             overlay = updated
             generateQR()
         }
@@ -989,6 +1201,7 @@ struct QROverlayItemView: View {
 struct QROverlayEditPanel: View {
     @Binding var overlay: QROverlay
     let canvasSize: CGSize
+    let printCanvasSize: CGSize
     var onDelete: () -> Void
     var onDone: () -> Void
 
@@ -1019,7 +1232,7 @@ struct QROverlayEditPanel: View {
 
                     Button(action: {
                         var updated = overlay
-                        updated.flipHorizontal(canvasSize: canvasSize)
+                        updated.flipHorizontal(canvasSize: canvasSize, printCanvasSize: printCanvasSize)
                         overlay = updated
                     }) {
                         Image(systemName: "arrow.left.and.right")
@@ -1032,7 +1245,7 @@ struct QROverlayEditPanel: View {
 
                     Button(action: {
                         var updated = overlay
-                        updated.flipVertical(canvasSize: canvasSize)
+                        updated.flipVertical(canvasSize: canvasSize, printCanvasSize: printCanvasSize)
                         overlay = updated
                     }) {
                         Image(systemName: "arrow.up.and.down")

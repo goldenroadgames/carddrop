@@ -282,13 +282,16 @@ struct EmailSignupView: View {
                 }
                 onSuccess()
             } catch {
-                let isKnown = AccountRegistry.shared.all()
-                    .contains { $0.displayName.lowercased() == email.lowercased() }
-                if isKnown {
-                    withAnimation { phase = .wrongPassword }
-                } else {
-                    await createAccount()
-                }
+                // Supabase deliberately returns the same generic error for
+                // "wrong password" and "no such account" (prevents email
+                // enumeration), so that failure alone can't tell us which
+                // this is. Rather than guess from a local, easily-stale
+                // on-device cache, always attempt account creation next —
+                // *that* call's own error (userAlreadyExists/emailExists)
+                // is the real, authoritative signal that this email
+                // already belongs to someone, since the user is the one
+                // claiming it themselves.
+                await createAccount()
             }
         }
     }
@@ -304,6 +307,12 @@ struct EmailSignupView: View {
                     .execute()
             }
             dismiss()
+        } catch let authError as AuthError {
+            if authError.errorCode == .userAlreadyExists || authError.errorCode == .emailExists {
+                withAnimation { phase = .wrongPassword }
+            } else {
+                errorMessage = authError.localizedDescription
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

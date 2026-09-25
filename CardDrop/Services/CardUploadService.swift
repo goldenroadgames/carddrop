@@ -7,11 +7,6 @@ struct CardSendResult {
     let sendsRemainingMonthly: Int   // -1 = unlimited
     let sendsRemainingLifetime: Int  // -1 = unlimited
     let tier: String
-    // Hosted URL for the fanned front+back composite thumbnail, when one
-    // was uploaded (see CardUploadService.send's compositeData param) —
-    // used as the inline image in email sends, where an embedded cid:
-    // attachment doesn't render reliably across mail clients.
-    var compositeImageURL: URL? = nil
 }
 
 enum CardUploadService {
@@ -101,7 +96,7 @@ enum CardUploadService {
 
         let configKeys = ["send_limit_\(tier)_monthly", "send_limit_\(tier)_lifetime"]
         guard let configRows = try? await supabase
-            .from("config")
+            .from("zz_config")
             .select("key, value")
             .in("key", value: configKeys)
             .execute()
@@ -122,18 +117,12 @@ enum CardUploadService {
     /// 1. Upload front image to card-images/{cardID}.jpg  (serves as teaser + HTML front)
     /// 2. Upload back image to card-images/{cardID}_back.jpg
     /// 2b. Upload 6x9 alt back image to card-images/{cardID}_back6x9.jpg, when available
-    /// 2c. Upload forLOB (blank no-ink zone) back samples, when available — test-only
-    ///     files for manually exercising LOB's API, not used by any real send yet
-    /// 3. Generate lightweight URL-based HTML and upload to card-html/{cardID}.html
-    /// 4. Call send-card Edge Function → get cardURL + sendsRemaining
+    /// 3. Call send-card Edge Function → get cardURL + sendsRemaining
     static func send(
         cardID: UUID,
         frontData: Data,
         backData: Data,
         back6x9Data: Data? = nil,
-        backForLOBData: Data? = nil,
-        back6x9ForLOBData: Data? = nil,
-        compositeData: Data? = nil,
         frontIsPortrait: Bool,
         frontInkMessage: String? = nil,
         backInkMessage: String? = nil,
@@ -145,78 +134,10 @@ enum CardUploadService {
         messagePreview: String?
     ) async throws -> CardSendResult {
 
-        let idStr = cardID.uuidString.lowercased()
-        guard let sender = try? await supabase.auth.session.user else {
-            throw UploadError.renderFailed
-        }
-        let senderID = sender.id.uuidString.lowercased()
-
-        // 1. Upload front image (also serves as teaser for email/SMS previews)
-        try await supabase.storage
-            .from("card-images")
-            .upload(
-                "\(senderID)/\(idStr).jpg",
-                data: frontData,
-                options: FileOptions(contentType: "image/jpeg", upsert: true)
-            )
-
-        // 2. Upload back image
-        try await supabase.storage
-            .from("card-images")
-            .upload(
-                "\(senderID)/\(idStr)_back.jpg",
-                data: backData,
-                options: FileOptions(contentType: "image/jpeg", upsert: true)
-            )
-
-        // 2b. Upload 6x9 alt back image, when available (older drafts rendered
-        // before this layout existed won't have one on disk)
-        if let back6x9Data {
-            try await supabase.storage
-                .from("card-images")
-                .upload(
-                    "\(senderID)/\(idStr)_back6x9.jpg",
-                    data: back6x9Data,
-                    options: FileOptions(contentType: "image/jpeg", upsert: true)
-                )
-        }
-
-        // 2c. Upload the forLOB (blank no-ink zone) back test samples, when
-        // available — lets LOB's API be exercised manually against real
-        // hosted files; not consumed by any real send flow yet.
-        if let backForLOBData {
-            try await supabase.storage
-                .from("card-images")
-                .upload(
-                    "\(senderID)/\(idStr)_back_forLOB.jpg",
-                    data: backForLOBData,
-                    options: FileOptions(contentType: "image/jpeg", upsert: true)
-                )
-        }
-        if let back6x9ForLOBData {
-            try await supabase.storage
-                .from("card-images")
-                .upload(
-                    "\(senderID)/\(idStr)_back6x9_forLOB.jpg",
-                    data: back6x9ForLOBData,
-                    options: FileOptions(contentType: "image/jpeg", upsert: true)
-                )
-        }
-
-        // 2d. Upload the fanned front+back composite thumbnail, when
-        // available — used as the inline image in email sends.
-        var compositeImageURL: URL? = nil
-        if let compositeData {
-            let path = "\(senderID)/\(idStr)_composite.jpg"
-            try await supabase.storage
-                .from("card-images")
-                .upload(path, data: compositeData, options: FileOptions(contentType: "image/jpeg", upsert: true))
-            compositeImageURL = SupabaseConfig.projectURL
-                .appendingPathComponent("storage/v1/object/public/card-images/\(path)")
-        }
+        try await uploadDigitalCardImages(cardID: cardID, frontData: frontData, backData: backData, back6x9Data: back6x9Data)
 
         // 3. Call send-card Edge Function
-        var result = try await callSendCardFunction(
+        return try await callSendCardFunction(
             cardID: cardID,
             isPortrait: frontIsPortrait,
             frontInkMessage: frontInkMessage,
@@ -228,8 +149,108 @@ enum CardUploadService {
             recipientEmail: recipientEmail,
             messagePreview: messagePreview
         )
-        result.compositeImageURL = compositeImageURL
-        return result
+    }
+
+    // MARK: - Digital card images
+
+    /// Uploads the digital-resolution front/back(+6x9) images to
+    /// card-images/{senderID}/{cardID}.jpg / _back.jpg / _back6x9.jpg — the
+    /// exact paths the webapp's /card/[id] page reads (see
+    /// web/app/card/[id]/page.tsx). Every card needs these, not just
+    /// digitally-sent ones: a physical postcard's back-of-card QR code links
+    /// to /card/{cardID} too, so without this upload that link 404s even
+    /// though the card was successfully mailed.
+    static func uploadDigitalCardImages(cardID: UUID, frontData: Data, backData: Data, back6x9Data: Data? = nil) async throws {
+        let idStr = cardID.uuidString.lowercased()
+        guard let sender = try? await supabase.auth.session.user else {
+            throw UploadError.renderFailed
+        }
+        let senderID = sender.id.uuidString.lowercased()
+
+        try await supabase.storage
+            .from("card-images")
+            .upload(
+                "\(senderID)/\(idStr).jpg",
+                data: frontData,
+                options: FileOptions(contentType: "image/jpeg", upsert: true)
+            )
+
+        try await supabase.storage
+            .from("card-images")
+            .upload(
+                "\(senderID)/\(idStr)_back.jpg",
+                data: backData,
+                options: FileOptions(contentType: "image/jpeg", upsert: true)
+            )
+
+        if let back6x9Data {
+            try await supabase.storage
+                .from("card-images")
+                .upload(
+                    "\(senderID)/\(idStr)_back6x9.jpg",
+                    data: back6x9Data,
+                    options: FileOptions(contentType: "image/jpeg", upsert: true)
+                )
+        }
+    }
+
+    // MARK: - LOB export upload
+
+    /// Uploads a front/back pair produced by `CardRenderer.renderLOBTestExport`
+    /// to the public card-images bucket. Used both by the DEBUG-only manual
+    /// LOB test buttons and by the real physical-mail send flow (after
+    /// payment succeeds, before calling submit-to-lob) — `sizeLabel` (e.g.
+    /// "4x6"/"6x9") just disambiguates the filenames so repeated
+    /// renders/orders at different sizes don't collide.
+    /// Returns the public URLs for a LOB export pair already uploaded for
+    /// this exact card+size, or nil if either file is missing. A card's
+    /// content is immutable once created (editing produces a new cardID via
+    /// cloneExact — see [[feedback_sent_card_cardid_not_clone]]), so a prior
+    /// render for this cardID+size is always byte-identical to a fresh one;
+    /// callers should check this before re-rendering/re-uploading so
+    /// ordering a second physical copy of the same card doesn't redundantly
+    /// overwrite the file that's already there.
+    static func existingLOBExportURLs(cardID: UUID, sizeLabel: String) async throws -> (frontURL: URL, backURL: URL)? {
+        guard let sender = try? await supabase.auth.session.user else {
+            throw UploadError.renderFailed
+        }
+        let senderID = sender.id.uuidString.lowercased()
+        let idStr = cardID.uuidString.lowercased()
+        let frontName = "\(idStr)_front_forLOB_\(sizeLabel).jpg"
+        let backName  = "\(idStr)_back_forLOB_\(sizeLabel).jpg"
+
+        let files = try await supabase.storage.from("card-images").list(
+            path: senderID,
+            options: SearchOptions(search: idStr)
+        )
+        let names = Set(files.map { $0.name })
+        guard names.contains(frontName), names.contains(backName) else { return nil }
+
+        let frontURL = SupabaseConfig.projectURL.appendingPathComponent("storage/v1/object/public/card-images/\(senderID)/\(frontName)")
+        let backURL  = SupabaseConfig.projectURL.appendingPathComponent("storage/v1/object/public/card-images/\(senderID)/\(backName)")
+        return (frontURL, backURL)
+    }
+
+    static func uploadLOBTestExport(cardID: UUID, frontData: Data, backData: Data, sizeLabel: String) async throws -> (frontURL: URL, backURL: URL) {
+        guard let sender = try? await supabase.auth.session.user else {
+            throw UploadError.renderFailed
+        }
+        let senderID = sender.id.uuidString.lowercased()
+        let idStr = cardID.uuidString.lowercased()
+
+        let frontPath = "\(senderID)/\(idStr)_front_forLOB_\(sizeLabel).jpg"
+        let backPath  = "\(senderID)/\(idStr)_back_forLOB_\(sizeLabel).jpg"
+
+        try await supabase.storage.from("card-images").upload(
+            frontPath, data: frontData, options: FileOptions(contentType: "image/jpeg", upsert: true)
+        )
+        try await supabase.storage.from("card-images").upload(
+            backPath, data: backData, options: FileOptions(contentType: "image/jpeg", upsert: true)
+        )
+
+        let frontURL = SupabaseConfig.projectURL.appendingPathComponent("storage/v1/object/public/card-images/\(frontPath)")
+        let backURL  = SupabaseConfig.projectURL.appendingPathComponent("storage/v1/object/public/card-images/\(backPath)")
+        return (frontURL, backURL)
     }
 
     // MARK: - Edge Function

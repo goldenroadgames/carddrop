@@ -29,7 +29,7 @@ struct CardbackPhrase: Decodable, Identifiable {
 enum CardBackContentService {
     static func fetchGreetings() async -> [CardbackGreeting] {
         (try? await supabase
-            .from("cardback_greetings")
+            .from("zz_cardback_greetings")
             .select("id, salutation_template, closing_template, sort_order")
             .order("sort_order")
             .execute()
@@ -38,7 +38,7 @@ enum CardBackContentService {
 
     static func fetchPhrases() async -> [CardbackPhrase] {
         (try? await supabase
-            .from("cardback_phrases")
+            .from("zz_cardback_phrases")
             .select("id, category, text, sort_order")
             .order("sort_order")
             .execute()

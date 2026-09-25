@@ -141,7 +141,7 @@ struct PostcardsView: View {
                                resumeParams = nil
                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                                    resumeParams = ResumeParams(
-                                       draft: clone, step: 5,
+                                       draft: clone, step: 4,
                                        draftID: nil, originalStatus: .unsent
                                    )
                                }
@@ -202,7 +202,7 @@ struct PostcardsView: View {
     // styled card that was sent.
     private func sendCardAgain(_ snapshot: PostcardDraftSnapshot) {
         let (draft, _) = draftManager.load(snapshot)
-        resumeParams = ResumeParams(draft: draft, step: 5, draftID: snapshot.id, originalStatus: .sent)
+        resumeParams = ResumeParams(draft: draft, step: 4, draftID: snapshot.id, originalStatus: .sent)
     }
 
     // "Copy & Edit" from SentCardDetailSheet — same clone + save-as-new-draft
