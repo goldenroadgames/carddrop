@@ -66,7 +66,8 @@ struct PostcardBackCanvas: View {
                 MessagePolygonLabel(
                     text: message,
                     boundingWidth: messageAreaMaxX,
-                    boundingHeight: messageAreaMaxY
+                    boundingHeight: messageAreaMaxY,
+                    fontStyle: draft.messageFont
                 )
             }
 
@@ -84,7 +85,8 @@ struct PostcardBackCanvas: View {
                     zoneWidth: w * inkFreeWidthFraction,
                     zoneHeight: h * inkFreeHeightFraction,
                     cardWidth: w,
-                    cardHeight: h
+                    cardHeight: h,
+                    fontStyle: draft.messageFont
                 )
             }
 
@@ -145,6 +147,11 @@ private struct InkZoneContent: View {
     let zoneHeight: CGFloat
     let cardWidth: CGFloat
     let cardHeight: CGFloat
+    // Only the font family varies with this — its size/line-height stay the
+    // same for both PRINT and SCRIPT (see PostcardDraft.CardbackMessageFont's
+    // doc comment: unlike the message polygon, the greeting/phrase/closing
+    // text needed no per-font size retuning between the two saved versions).
+    let fontStyle: CardbackMessageFont
 
     // Bic Cristal ballpoint blue — matches MessagePolygonLabel's inkColor.
     private let inkColor = Color(red: 0.11, green: 0.24, blue: 0.45)
@@ -155,10 +162,7 @@ private struct InkZoneContent: View {
     private let phraseSideMargin: CGFloat = 250
 
     private var sharedFont: UIFont {
-        // UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-        // UIFont(name: "SpecialElite-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-        // UIFont(name: "CourierPrime-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-        UIFont(name: "AmericanTypewriter", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        UIFont(name: fontStyle.uiFontName, size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
     }
 
     var body: some View {
@@ -313,9 +317,24 @@ private struct MessagePolygonLabel: View {
     let text: String
     let boundingWidth: CGFloat
     let boundingHeight: CGFloat
+    let fontStyle: CardbackMessageFont
 
-    private let fontSize: CGFloat = 84
-    private let lineHeight: CGFloat = 86
+    // Tuned per font — a script face needs different sizing/spacing than a
+    // print face to read well at the same nominal weight. Values are the
+    // ones saved in git for each: PRINT is the current (2026-09-25) tuning,
+    // SCRIPT is what was live on 2026-09-09 before the switch to PRINT.
+    private var fontSize: CGFloat {
+        switch fontStyle {
+        case .print:  return 84
+        case .script: return 98
+        }
+    }
+    private var lineHeight: CGFloat {
+        switch fontStyle {
+        case .print:  return 86
+        case .script: return 97
+        }
+    }
 
     private let startIndent: CGFloat = 50
 
@@ -324,10 +343,7 @@ private struct MessagePolygonLabel: View {
 
     var body: some View {
         Canvas { context, _ in
-            // let font = UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-            // let font = UIFont(name: "SpecialElite-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-            // let font = UIFont(name: "CourierPrime-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-            let font = UIFont(name: "AmericanTypewriter", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            let font = UIFont(name: fontStyle.uiFontName, size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
 
             // Start at a fixed position (line 2's slot, still inside the
             // wide Zone A), indented, instead of the very top, so typing

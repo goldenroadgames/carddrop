@@ -1,8 +1,10 @@
 import SwiftUI
 import Combine
 import Supabase
+import AuthenticationServices
+import CryptoKit
 
-class AuthManager: ObservableObject {
+class AuthManager: NSObject, ObservableObject {
     @Published var isAuthenticated = false
     @Published var isAnonymous = false
     @Published var isEmailVerified = false
@@ -19,13 +21,23 @@ class AuthManager: ObservableObject {
     @Published var profileZip: String = ""
     @Published var profileCountry: String = ""
 
+    // Marketing-use preference (Privacy Policy Section 5) — defaults true to
+    // match the DB column default; only meaningful for non-anonymous users.
+    @Published var allowMarketingUse: Bool = true
+
     // Subscription tier
     @Published private(set) var hasPermanentStorage: Bool = false
 
     // Send limit proximity
     @Published private(set) var nearMonthlyLimit: Bool = false
 
-    init() {
+    // Sign in with Apple — bridges the ASAuthorizationController delegate
+    // callbacks (which can't carry async context) back to the async link flow.
+    private var currentAppleNonce: String?
+    private var pendingAppleCompletion: (() -> Void)?
+
+    override init() {
+        super.init()
         Task { @MainActor in
             // supabase-swift's next major version will emit the locally
             // cached session as `.initialSession` unconditionally, even if
@@ -75,11 +87,12 @@ class AuthManager: ObservableObject {
             let country: String?
             let tier: String?
             let sends_this_month: Int?
+            let allow_marketing_use: Bool?
         }
         struct ConfigRow: Decodable { let value: String }
         guard let row = try? await supabase
             .from("users")
-            .select("first_name, last_name, phone, street, city, state, zip, country, tier, sends_this_month")
+            .select("first_name, last_name, phone, street, city, state, zip, country, tier, sends_this_month, allow_marketing_use")
             .eq("id", value: id.uuidString)
             .single()
             .execute()
@@ -103,7 +116,9 @@ class AuthManager: ObservableObject {
         }
 
         await MainActor.run {
-            firstName            = row.first_name  ?? ""
+            // Don't clobber a name already set locally (e.g. from Apple's
+            // one-time name grant on first sign-in) before it's persisted.
+            if let f = row.first_name, !f.isEmpty { firstName = f }
             lastName             = row.last_name   ?? ""
             profilePhone         = row.phone       ?? ""
             profileStreet        = row.street     ?? ""
@@ -113,6 +128,22 @@ class AuthManager: ObservableObject {
             profileCountry       = row.country    ?? ""
             hasPermanentStorage  = row.tier == "unlimited"
             nearMonthlyLimit     = nearLimit
+            allowMarketingUse    = row.allow_marketing_use ?? true
+        }
+    }
+
+    /// Persists the marketing-use opt-out (Privacy Policy Section 5). Only
+    /// affects which cards we select going forward — never retracts cards
+    /// already flagged for marketing use.
+    func setAllowMarketingUse(_ allow: Bool) {
+        guard let idString = currentUserID, let id = UUID(uuidString: idString) else { return }
+        allowMarketingUse = allow
+        Task {
+            let row: [String: AnyJSON] = [
+                "id": .string(id.uuidString),
+                "allow_marketing_use": .bool(allow)
+            ]
+            _ = try? await supabase.from("users").upsert(row, onConflict: "id").execute()
         }
     }
 
@@ -181,6 +212,7 @@ class AuthManager: ObservableObject {
         profileState = ""; profileZip = ""; profileCountry = ""
         hasPermanentStorage = false
         nearMonthlyLimit = false
+        allowMarketingUse = true
     }
 
     // MARK: - Email
@@ -268,9 +300,107 @@ class AuthManager: ObservableObject {
         return false
     }
 
-    /// Sign in with Apple — preserves anonymous UUID via Supabase linkIdentity.
-    /// TODO: implement once Apple Developer + Supabase Apple provider are configured.
-    func signInWithApple() {
-        // Implementation pending Apple Developer setup
+    /// Sign in with Apple — links onto the current anonymous session via
+    /// Supabase's native linkIdentityWithIdToken, preserving the anonymous
+    /// UUID (and any draft data tied to it). An anonymous session always
+    /// exists by the time this is reachable (AuthManager.init ensures one
+    /// at launch), but we guard here too in case that hasn't resolved yet.
+    func signInWithApple(onSuccess: (() -> Void)? = nil) {
+        pendingAppleCompletion = onSuccess
+        Task { @MainActor in
+            if !isAnonymous {
+                try? await supabase.auth.signInAnonymously()
+            }
+
+            let nonce = Self.randomNonceString()
+            currentAppleNonce = nonce
+
+            let request = ASAuthorizationAppleIDProvider().createRequest()
+            request.requestedScopes = [.fullName, .email]
+            request.nonce = Self.sha256(nonce)
+
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = self
+            controller.presentationContextProvider = self
+            controller.performRequests()
+        }
+    }
+
+    private static func randomNonceString(length: Int = 32) -> String {
+        var randomBytes = [UInt8](repeating: 0, count: length)
+        let status = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
+        precondition(status == errSecSuccess, "Unable to generate nonce: OSStatus \(status)")
+        let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        return String(randomBytes.map { charset[Int($0) % charset.count] })
+    }
+
+    private static func sha256(_ input: String) -> String {
+        SHA256.hash(data: Data(input.utf8)).compactMap { String(format: "%02x", $0) }.joined()
+    }
+}
+
+// MARK: - ASAuthorizationControllerDelegate
+
+extension AuthManager: ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+              let tokenData = credential.identityToken,
+              let idToken = String(data: tokenData, encoding: .utf8),
+              let nonce = currentAppleNonce
+        else {
+            print("❌ Sign in with Apple: missing credential/idToken/nonce")
+            return
+        }
+        currentAppleNonce = nil
+        let givenName = credential.fullName?.givenName
+        let completion = pendingAppleCompletion
+        pendingAppleCompletion = nil
+
+        Task { @MainActor in
+            let credentials = OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: nonce)
+            do {
+                // First-ever Apple sign-in for this device/anonymous session:
+                // link onto the current anonymous user so drafts carry over.
+                try await supabase.auth.linkIdentityWithIdToken(credentials: credentials)
+            } catch {
+                // Fails when this Apple identity is already linked to a
+                // DIFFERENT Supabase user — the expected case for a
+                // returning user signing back in after signOut(), since
+                // signOut leaves a brand-new (different) anonymous session
+                // in its place, and that identity can't be linked twice.
+                // Fall back to a normal sign-in, which looks up and resumes
+                // the existing Apple-linked account instead.
+                do {
+                    try await supabase.auth.signInWithIdToken(credentials: credentials)
+                } catch {
+                    print("❌ Sign in with Apple failed (both link and sign-in): \(error)")
+                    return
+                }
+            }
+            try? await supabase.auth.update(user: UserAttributes(data: ["send_unlocked": .bool(true)]))
+            // Apple only grants the name on the very first authorization for
+            // this app — capture it now, it won't come again.
+            if let givenName, !givenName.isEmpty {
+                self.firstName = givenName
+            }
+            completion?()
+        }
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        currentAppleNonce = nil
+        pendingAppleCompletion = nil
+        if let authError = error as? ASAuthorizationError, authError.code == .canceled {
+            return // user backed out — not a real error
+        }
+        print("❌ Sign in with Apple authorization failed: \(error)")
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow } ?? ASPresentationAnchor()
     }
 }

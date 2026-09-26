@@ -46,6 +46,26 @@ enum CanvasBackgroundColor: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+// Cardback message font choice — PRINT (AmericanTypewriter) or SCRIPT
+// (DancingScript-Bold). The two fonts need different (fontSize, lineHeight)
+// tuning per canvas, and on the 6x9 back a different message-polygon/band
+// geometry too (a script font's letterforms need more vertical room, which
+// nudges where the branding band sits) — see each canvas's own per-style
+// constants, keyed off this enum, rather than a single shared value.
+enum CardbackMessageFont: String, CaseIterable, Identifiable, Codable, Hashable {
+    case print
+    case script
+
+    var id: String { rawValue }
+
+    var uiFontName: String {
+        switch self {
+        case .print:  return "AmericanTypewriter"
+        case .script: return "DancingScript-Bold"
+        }
+    }
+}
+
 enum ModerationState {
     case untested   // not yet checked, or content changed since last check
     case passed     // checked and clean — skip re-check until content changes
@@ -107,6 +127,7 @@ class PostcardDraft: ObservableObject {
     @Published var message: String = "" {
         didSet { moderationState = .untested }
     }
+    @Published var messageFont: CardbackMessageFont = .print
 
     // Digital-only cardback ink-free-zone content: an optional greeting
     // combo (salutation + closing) and an optional standalone phrase.
@@ -190,6 +211,7 @@ class PostcardDraft: ObservableObject {
         c.qrOverlays         = qrOverlays
         c.senderNickname     = senderNickname
         c.message            = message
+        c.messageFont        = messageFont
         // Greeting text is recipient-specific (uses recipientNickname, which
         // is intentionally left blank below), so only the selection carries
         // over — MessageStepView recomputes greetingSalutation/Closing once

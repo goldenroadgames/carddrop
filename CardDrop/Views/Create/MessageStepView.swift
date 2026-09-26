@@ -3,6 +3,8 @@ import CoreImage.CIFilterBuiltins
 
 private enum MessageField: Hashable {
     case message
+    case recipientNickname
+    case senderNickname
 }
 
 struct MessageStepView: View {
@@ -27,6 +29,44 @@ struct MessageStepView: View {
 
     private var usedContactPickerForTo: Bool {
         contactPickedNickname != nil && contactPickedNickname == draft.recipientNickname
+    }
+
+    // Keyboard-dismiss control, top-trailing of the keyboard itself — shown
+    // regardless of which of the three fields (message, To, From) raised
+    // it, since this is attached to the step's shared ancestor rather than
+    // any one field. Split out as its own @ToolbarContentBuilder (rather
+    // than inline in .toolbar { }) so the iOS 26 Liquid Glass opt-out below
+    // can be applied — same reasoning/pattern as toolbarPillItem() in
+    // ToolbarPillButton.swift, which sharedBackgroundVisibility(.hidden)
+    // requires being a ToolbarContent-level modifier, not something our
+    // custom blue-circle button view can apply to itself.
+    @ToolbarContentBuilder
+    private var keyboardDismissToolbarContent: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                keyboardDismissButton
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                keyboardDismissButton
+            }
+        }
+    }
+
+    private var keyboardDismissButton: some View {
+        Button {
+            focus = nil
+        } label: {
+            Image(systemName: "keyboard.chevron.compact.down")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 38, height: 38)
+                .background(Color.brandBlue)
+                .clipShape(Circle())
+        }
     }
 
     private static let phraseCategories = ["All", "Basic", "Romantic", "Quirky"]
@@ -63,6 +103,15 @@ struct MessageStepView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.secondary)
                         .textCase(.uppercase)
+
+                    SlidingTogglePill(
+                        options: [(CardbackMessageFont.print, "Print"), (.script, "Script")],
+                        selection: draft.messageFont
+                    ) { option in
+                        draft.messageFont = option
+                    }
+                    .frame(width: 150)
+
                     Spacer()
                     Text("\(draft.message.count)/525")
                         .font(.caption)
@@ -85,14 +134,6 @@ struct MessageStepView: View {
                         // which isn't otherwise exposed to trim directly.
                         .padding(.top, -8)
                         .focused($focus, equals: .message)
-                        .toolbar {
-                            ToolbarItemGroup(placement: .keyboard) {
-                                Spacer()
-                                Button("Done") { focus = nil }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(Color.brandBlue)
-                            }
-                        }
                         .onKeyPress(.tab) { .handled }
                         .onKeyPress(.return) { .handled }
                         .onChange(of: draft.message) { _, new in
@@ -112,6 +153,14 @@ struct MessageStepView: View {
         .padding(.horizontal)
         .padding(.top, 5 - 15 + 5)
         .padding(.bottom, 0)
+        // Keyboard-dismiss control, top-trailing of the keyboard itself —
+        // attached here (the whole step's shared ancestor) rather than on
+        // any one field, so it shows and dismisses the keyboard uniformly
+        // regardless of which of the three fields (message, To, From) is
+        // what raised it.
+        .toolbar {
+            keyboardDismissToolbarContent
+        }
         .task {
             if greetings.isEmpty {
                 greetings = await CardBackContentService.fetchGreetings()
@@ -292,6 +341,7 @@ struct MessageStepView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(draft.showRecipientNicknameError ? Color.red : Color(.systemGray4), lineWidth: draft.showRecipientNicknameError ? 1.5 : 1)
                         )
+                        .focused($focus, equals: .recipientNickname)
                         .onChange(of: draft.recipientNickname) { _, _ in draft.showRecipientNicknameError = false }
                 }
                 .frame(maxWidth: .infinity)
@@ -308,6 +358,7 @@ struct MessageStepView: View {
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(draft.showSenderNicknameError ? Color.red : Color(.systemGray4), lineWidth: draft.showSenderNicknameError ? 1.5 : 1)
                         )
+                        .focused($focus, equals: .senderNickname)
                         .onChange(of: draft.senderNickname) { _, newValue in
                             draft.showSenderNicknameError = false
                             nicknameSyncTask?.cancel()

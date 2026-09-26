@@ -50,7 +50,22 @@ struct ProfileView: View {
 
                 Section {
                     Text("Notifications")
-                    Text("Privacy")
+                    if !authManager.isAnonymous {
+                        Toggle("Feature my cards in marketing", isOn: Binding(
+                            get: { authManager.allowMarketingUse },
+                            set: { authManager.setAllowMarketingUse($0) }
+                        ))
+                    }
+                    NavigationLink {
+                        LegalDocumentView(title: "Terms of Service", document: .termsOfService)
+                    } label: {
+                        Text("Terms of Service")
+                    }
+                    NavigationLink {
+                        LegalDocumentView(title: "Privacy Policy", document: .privacyPolicy)
+                    } label: {
+                        Text("Privacy Policy")
+                    }
                 } header: {
                     HStack {
                         Text("Settings")
@@ -63,6 +78,26 @@ struct ProfileView: View {
                         .foregroundColor(.red)
                     }
                     .textCase(.none)
+                } footer: {
+                    if !authManager.isAnonymous {
+                        Text("Turning this off only affects cards you create going forward — any already selected for marketing stay in use.")
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if authManager.isAnonymous {
+                    Button(action: { showSignInGate = true }) {
+                        Text("Create an account for unlimited sending")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(Color.brandBlue)
+                            .foregroundColor(.white)
+                            .cornerRadius(999)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 12)
+                    .background(Color(uiColor: .systemBackground))
                 }
             }
             .navigationBarHidden(true)
@@ -101,22 +136,6 @@ struct ProfileView: View {
                 .environmentObject(authManager)
                 .environmentObject(draftManager)
                 .environmentObject(addressBook)
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if authManager.isAnonymous {
-                Button(action: { showSignInGate = true }) {
-                    Text("Create an account for unlimited sending")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color.brandBlue)
-                        .foregroundColor(.white)
-                        .cornerRadius(999)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 12)
-                .background(Color(uiColor: .systemBackground))
-            }
         }
     }
 

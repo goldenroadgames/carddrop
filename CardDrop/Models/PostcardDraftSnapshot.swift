@@ -175,6 +175,7 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
     var borderStyle: String
     var canvasBackgroundColorRaw: String?  // Optional for backward-compatible decode
     var photoMirrorEnabled: Bool?          // Optional for backward-compatible decode
+    var messageFontRaw: String?            // Optional for backward-compatible decode
     var borderText: String
     var borderFontName: String
     var borderTextR, borderTextG, borderTextB: Double
@@ -250,6 +251,7 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
         borderStyle    = draft.border.rawValue
         canvasBackgroundColorRaw = draft.canvasBackgroundColor.rawValue
         photoMirrorEnabled = draft.photoMirrorEnabled
+        messageFontRaw = draft.messageFont.rawValue
         borderText     = draft.borderText
         borderFontName = draft.borderFontName
         var bR: CGFloat = 0, bG: CGFloat = 0, bB: CGFloat = 0, bA: CGFloat = 0
@@ -312,6 +314,7 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
         d.border          = PostcardBorder(rawValue: borderStyle) ?? .fullBleed
         d.canvasBackgroundColor = CanvasBackgroundColor(rawValue: canvasBackgroundColorRaw ?? "") ?? .white
         d.photoMirrorEnabled = photoMirrorEnabled ?? true
+        d.messageFont = CardbackMessageFont(rawValue: messageFontRaw ?? "") ?? .print
         d.borderText      = borderText
         d.borderFontName  = borderFontName
         d.borderTextColor = Color(red: borderTextR, green: borderTextG, blue: borderTextB)

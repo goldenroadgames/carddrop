@@ -30,7 +30,7 @@ struct AuthView: View {
             pillHeight: pillHeight
         ) {
             VStack(spacing: 6) {
-                Button(action: { authManager.signInWithApple() }) {
+                Button(action: { authManager.signInWithApple(onSuccess: onSkip) }) {
                     HStack {
                         Image(systemName: "apple.logo")
                         Text("Sign in with Apple")

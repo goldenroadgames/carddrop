@@ -17,6 +17,7 @@ struct SubscribeGateView: View {
 
     @State private var showEmailSignup = false
     @State private var showAppleProfile = false
+    @State private var showLegal: LegalDocumentService.Document?
 
     var body: some View {
         NavigationStack {
@@ -45,6 +46,17 @@ struct SubscribeGateView: View {
             .sheet(isPresented: $showAppleProfile) {
                 AppleSignInProfileView(onSuccess: onSuccess)
                     .environmentObject(authManager)
+            }
+            .sheet(item: $showLegal) { document in
+                NavigationStack {
+                    LegalDocumentView(
+                        title: document == .termsOfService ? "Terms of Service" : "Privacy Policy",
+                        document: document
+                    )
+                    .toolbar {
+                        toolbarPillItem("Done", placement: .confirmationAction, style: .bare) { showLegal = nil }
+                    }
+                }
             }
             // Auto-advance when verification comes through
             .onChange(of: authManager.isEmailVerified) {
@@ -87,10 +99,7 @@ struct SubscribeGateView: View {
             Divider().padding(.horizontal)
 
             VStack(spacing: 5) {
-                // TODO: Replace with real Apple auth when Apple Developer is configured.
-                // On successful auth, Apple provides name (first login only) — store to
-                // authManager before presenting AppleSignInProfileView.
-                Button(action: { authManager.signInWithApple() }) {
+                Button(action: { authManager.signInWithApple(onSuccess: { showAppleProfile = true }) }) {
                     HStack {
                         Image(systemName: "apple.logo")
                         Text("Sign in with Apple")
@@ -132,13 +141,21 @@ struct SubscribeGateView: View {
             .foregroundColor(.secondary)
             .frame(maxWidth: .infinity)
 
-            Text("We store your name, email, and optional address and phone to auto-fill your cards and deliver physical ones when you choose. Recipient names and addresses you enter are saved to your personal address book so you don't have to re-enter them — we don't use recipient information for marketing or share it with anyone. You can delete your own info or any saved address at any time, no questions asked.")
+            Text("We store your name, email, and optional address and phone to auto-fill your cards and deliver physical ones when you choose. Recipient names and addresses you enter are saved to your personal address book so you don't have to re-enter them — we never use recipient information for marketing or share it with anyone. We may feature the design of cards you create in our own marketing; you can opt-out at any time in Settings. You can delete your own info or any saved address at any time, no questions asked.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 4) {
+                Button("Terms of Service") { showLegal = .termsOfService }
+                Text("·")
+                Button("Privacy Policy") { showLegal = .privacyPolicy }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundColor(.secondary)
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, 60)
         .padding(.top, 8)
     }
 
@@ -348,7 +365,6 @@ struct EmailSignupView: View {
 
 /// Presented after successful Sign in with Apple to confirm name and collect mailing address.
 /// Apple provides name on first login only — pre-filled from authManager.firstName if available.
-/// TODO: Wire onSuccess into the real Apple auth completion callback when Apple Developer is configured.
 struct AppleSignInProfileView: View {
     var onSuccess: () -> Void
 

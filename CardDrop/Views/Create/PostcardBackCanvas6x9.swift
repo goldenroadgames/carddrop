@@ -59,13 +59,18 @@ struct PostcardBackCanvas6x9: View {
         let bandH: CGFloat = bandDesignH * bandScale
         let bandX: CGFloat = 2820
         let bandY: CGFloat = 940
-        // Band's actual drawn position — offset from bandX/bandY, which stay
-        // fixed as the inputs to the message polygon's zone math above/below.
-        // Right edge flush with the gray rectangle's right edge — that
-        // rectangle is inset 40px from the raw no-ink zone's right edge
-        // (InkZoneContent6x9 draws it at zoneWidth - 80, centered).
-        let bandOffsetX: CGFloat = noInkLeft + noInkWidth - 40 - bandW
-        let bandOffsetY: CGFloat = 970
+        // Band's actual drawn position. PRINT computes it from the no-ink
+        // zone (right edge flush with the gray rectangle's right edge, which
+        // is itself inset 40px from the raw no-ink zone's right edge — see
+        // InkZoneContent6x9); SCRIPT uses the original fixed bandX/bandY —
+        // the two fonts' message-polygon geometry were tuned independently
+        // (saved 2026-09-09 for SCRIPT, 2026-09-25 for PRINT) and were never
+        // reconciled to share one band-position formula, so this keeps each
+        // exactly as it was measured rather than guessing they're equivalent.
+        let bandOffsetX: CGFloat = draft.messageFont == .print
+            ? noInkLeft + noInkWidth - 40 - bandW
+            : bandX
+        let bandOffsetY: CGFloat = draft.messageFont == .print ? 970 : bandY
 
         // Message-area polygon — three zones, same shape as the 4x6 back's:
         // the band is narrower than the no-ink zone here, so the obstacle
@@ -79,11 +84,14 @@ struct PostcardBackCanvas6x9: View {
         // above ever change — those still drive the real ink-free content
         // zone (`noInkLeft`/`noInkTop` below), which is intentionally kept
         // separate from this polygon's own obstacle edges.
+        //
+        // Two independently-tuned sets, one per font (see bandOffsetX/Y
+        // comment above for why they're not derived from one shared formula).
         let messageAreaLeftX: CGFloat = 160
-        let messageAreaTopY:  CGFloat = 113
+        let messageAreaTopY:  CGFloat = draft.messageFont == .print ? 113  : 143
         let messageAreaMaxX:  CGFloat = 3910
-        let messageAreaMaxY:  CGFloat = 2616
-        let messagePolygonNoInkTop:  CGFloat = 1595
+        let messageAreaMaxY:  CGFloat = draft.messageFont == .print ? 2616 : 2646
+        let messagePolygonNoInkTop:  CGFloat = draft.messageFont == .print ? 1595 : 1625
         let messagePolygonNoInkLeft: CGFloat = 2200
         let messageZones: [MessageZone6x9] = [
             MessageZone6x9(yStart: messageAreaTopY, yEnd: bandY + 3,     right: messageAreaMaxX),
@@ -109,7 +117,8 @@ struct PostcardBackCanvas6x9: View {
                     leftX: messageAreaLeftX,
                     topY: messageAreaTopY,
                     maxY: messageAreaMaxY,
-                    zones: messageZones
+                    zones: messageZones,
+                    fontStyle: draft.messageFont
                 )
             }
 
@@ -125,7 +134,8 @@ struct PostcardBackCanvas6x9: View {
                     zoneWidth: noInkWidth,
                     zoneHeight: noInkHeight,
                     cardWidth: w,
-                    cardHeight: h
+                    cardHeight: h,
+                    fontStyle: draft.messageFont
                 )
             }
         }
@@ -148,6 +158,10 @@ private struct InkZoneContent6x9: View {
     let zoneHeight: CGFloat
     let cardWidth: CGFloat
     let cardHeight: CGFloat
+    // Only the font family varies with this — size/line-height are unchanged
+    // between PRINT and SCRIPT for this text, same as the 4x6 back's
+    // InkZoneContent.
+    let fontStyle: CardbackMessageFont
 
     private let inkColor = Color(red: 0.11, green: 0.24, blue: 0.45)
     private let inkUIColor = UIColor(red: 0.11, green: 0.24, blue: 0.45, alpha: 1)
@@ -157,10 +171,7 @@ private struct InkZoneContent6x9: View {
     private let phraseSideMargin: CGFloat = 250
 
     private var sharedFont: UIFont {
-        // UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-        // UIFont(name: "SpecialElite-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-        // UIFont(name: "CourierPrime-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-        UIFont(name: "AmericanTypewriter", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+        UIFont(name: fontStyle.uiFontName, size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
     }
 
     var body: some View {
@@ -275,9 +286,23 @@ private struct MessagePolygonLabel6x9: View {
     // itself, not just the CGContext at draw time.
     let maxY: CGFloat
     let zones: [MessageZone6x9]
+    let fontStyle: CardbackMessageFont
 
-    private let fontSize: CGFloat = 154
-    private let lineHeight: CGFloat = 164
+    // PRINT is the current (2026-09-25) tuning; SCRIPT is what was live on
+    // 2026-09-09 before the switch to PRINT — see PostcardBackCanvas.swift's
+    // MessagePolygonLabel for the 4x6 equivalent.
+    private var fontSize: CGFloat {
+        switch fontStyle {
+        case .print:  return 154
+        case .script: return 176
+        }
+    }
+    private var lineHeight: CGFloat {
+        switch fontStyle {
+        case .print:  return 164
+        case .script: return 179
+        }
+    }
     private let startIndent: CGFloat = 50
     private let inkColor = UIColor(red: 0.11, green: 0.24, blue: 0.45, alpha: 1)
 
@@ -301,10 +326,7 @@ private struct MessagePolygonLabel6x9: View {
 
     var body: some View {
         Canvas { context, _ in
-            // let font = UIFont(name: "DancingScript-Bold", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-            // let font = UIFont(name: "SpecialElite-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-            // let font = UIFont(name: "CourierPrime-Regular", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-            let font = UIFont(name: "AmericanTypewriter", size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
+            let font = UIFont(name: fontStyle.uiFontName, size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
 
             // Start at a fixed position (line 2's slot, still inside the
             // wide Zone A), indented, instead of the very top, so typing

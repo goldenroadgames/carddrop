@@ -640,10 +640,12 @@ struct ChoosePhotoStepView: View {
 }
 
 // MARK: - Sliding Toggle  (2-option pill with an animated blue thumb that
-// slides to the selected side — used for Orientation and Border. Not
-// .pickerStyle(.segmented): a native segmented control has its own fixed
-// intrinsic height and won't stretch to fill a taller frame.)
-private struct SlidingTogglePill<T: Hashable>: View {
+// slides to the selected side — used for Orientation and Border, and (from
+// MessageStepView) the cardback message font. Not .pickerStyle(.segmented):
+// a native segmented control has its own fixed intrinsic height and won't
+// stretch to fill a taller frame. Not private — reused across create-flow
+// step files.
+struct SlidingTogglePill<T: Hashable>: View {
     let options: [(value: T, label: String)]
     let selection: T
     let onSelect: (T) -> Void
