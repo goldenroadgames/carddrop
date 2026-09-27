@@ -178,9 +178,7 @@ extension GreetingsOverlay {
         let bigWordFontSize = GreetingsGeometry.bigWordFontSize(
             forLetterHeight: 225, maxBadgeWidth: referenceWidth - 2 * GreetingsBadgeRenderer.cardEdgeClearance,
             word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize,
-            isLandscape: isLandscape, printScale: 1.0,
-            isTilt: overlay.fixedPosition == .left, canvasSize: CGSize(width: referenceWidth, height: referenceHeight),
-            topClearance: GreetingsBadgeRenderer.topClearance)
+            isLandscape: isLandscape, printScale: 1.0)
         let geometry = GreetingsGeometry(
             word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize,
             scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0,
@@ -451,7 +449,7 @@ struct GreetingsGeometry {
     // rather than overflowing the card. Badge width isn't perfectly linear
     // in font size (fixed padding terms), so this takes a few correction
     // passes to converge.
-    static func bigWordFontSize(forLetterHeight desiredHeight: CGFloat, maxBadgeWidth: CGFloat, word: String, scriptText: String, fontName: String, scriptFontSize: CGFloat, isLandscape: Bool, printScale: CGFloat, isTilt: Bool = false, canvasSize: CGSize = .zero, topClearance: CGFloat = 0) -> CGFloat {
+    static func bigWordFontSize(forLetterHeight desiredHeight: CGFloat, maxBadgeWidth: CGFloat, word: String, scriptText: String, fontName: String, scriptFontSize: CGFloat, isLandscape: Bool, printScale: CGFloat) -> CGFloat {
         var fontSize = bigWordFontSize(forLetterHeight: desiredHeight)
         guard maxBadgeWidth > 0 else { return fontSize }
         for _ in 0..<4 {
@@ -459,28 +457,6 @@ struct GreetingsGeometry {
             let badgeWidth = g.estimatedBadgeSize().width
             guard badgeWidth > maxBadgeWidth else { break }
             fontSize *= maxBadgeWidth / badgeWidth
-        }
-        // The width cap above only guarantees LEFT/RIGHT card-edge clearance
-        // (via GreetingsFixedPosition.center()'s cx clamp) — it says nothing
-        // about the TOP edge. Tilt's rotation lifts points farther from the
-        // badge's own center more, so a WIDE badge (a long word, or a
-        // multi-word phrase) can push its true topmost point above the
-        // canvas top even while comfortably satisfying the width cap — see
-        // center()'s own "no safety clamp here" comment. Shrink further,
-        // in small steps against the REAL placed-and-rotated bounding box,
-        // until it also respects topClearance.
-        if isTilt, canvasSize.width > 0, topClearance > 0 {
-            let position = GreetingsFixedPosition.left
-            let theta = position.rotationDegrees(isLandscape: isLandscape) * .pi / 180
-            for _ in 0..<40 {
-                let g = GreetingsGeometry(word: word, scriptText: scriptText, fontName: fontName, bigWordFontSize: fontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: printScale, isTilt: true)
-                let badgeSize = g.estimatedBadgeSize()
-                let center = position.center(badgeSize: badgeSize, canvasSize: canvasSize)
-                let halfBBoxH = (abs(badgeSize.width * sin(theta)) + abs(badgeSize.height * cos(theta))) / 2
-                let topY = center.y - halfBBoxH
-                guard topY < topClearance else { break }
-                fontSize *= 0.97
-            }
         }
         return max(8, fontSize)
     }

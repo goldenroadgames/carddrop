@@ -39,21 +39,8 @@ enum GreetingsBadgeRenderer {
     // there.
     static let cardEdgeClearance: CGFloat = 150
 
-    // Guaranteed minimum clearance from the CARD's own TOP edge — 3/8in at
-    // 300dpi. Only Tilt needs this enforced explicitly: GreetingsFixedPosition
-    // .center()'s fixed left-edge-crossing point does NOT bound the rotated
-    // badge's true topmost point (its own comment says so directly) — a
-    // wide badge (a long word, or several words) pushes further above the
-    // canvas top the wider it gets, since Tilt's rotation lifts points
-    // farther from the badge's own center more. Enforced by shrinking
-    // bigWordFontSize further in GreetingsGeometry.bigWordFontSize(...)
-    // once the width cap alone isn't enough. .center never needs this — it
-    // isn't rotated and bleeds flush to the top by design.
-    static let topClearance: CGFloat = 112.5
-
     static func render(overlay: GreetingsOverlay, isLandscape: Bool) -> (image: UIImage, size: CGSize)? {
         let referenceWidth: CGFloat = isLandscape ? 2775 : 1875
-        let referenceHeight: CGFloat = isLandscape ? 1875 : 2775
         let preset = GreetingsPreset.find(overlay.presetID)
         let scriptFontSize = GreetingsGeometry.scriptFontSize(for: overlay.scriptText, isLandscape: isLandscape, scale: 1.0)
         let targetHeight: CGFloat = 225  // 1in at 300dpi, printScale = 1.0
@@ -65,9 +52,7 @@ enum GreetingsBadgeRenderer {
         let bigWordFontSize = GreetingsGeometry.bigWordFontSize(
             forLetterHeight: targetHeight, maxBadgeWidth: referenceWidth - 2 * cardEdgeClearance, word: overlay.word,
             scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize,
-            isLandscape: isLandscape, printScale: 1.0,
-            isTilt: overlay.fixedPosition == .left, canvasSize: CGSize(width: referenceWidth, height: referenceHeight),
-            topClearance: topClearance)
+            isLandscape: isLandscape, printScale: 1.0)
 
         // letterEdgeClearance (1/4in at 300dpi) of padding per side between
         // the letters and the badge's own (un-rotated) edge — for Tilt, the
