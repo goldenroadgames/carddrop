@@ -623,7 +623,8 @@ struct GreetingsCaptionItemView: View {
     // first frame, before the real bitmap (and its exact size) is ready.
     private var fallbackSize: CGSize {
         let scriptFontSize = GreetingsGeometry.scriptFontSize(for: overlay.scriptText, isLandscape: isLandscape, scale: 1.0)
-        let bigWordFontSize = GreetingsGeometry.bigWordFontSize(forLetterHeight: 225, maxBadgeWidth: referenceWidth - 2 * GreetingsBadgeRenderer.cardEdgeClearance, word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0)
+        let fallbackCanvasSize = CGSize(width: referenceWidth, height: referenceWidth * canvasSize.height / canvasSize.width)
+        let bigWordFontSize = GreetingsGeometry.bigWordFontSize(forLetterHeight: 225, maxBadgeWidth: referenceWidth - 2 * GreetingsBadgeRenderer.cardEdgeClearance, word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0, isTilt: overlay.fixedPosition == .left, canvasSize: fallbackCanvasSize, topClearance: GreetingsBadgeRenderer.topClearance)
         let geometry = GreetingsGeometry(word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0, isTilt: overlay.fixedPosition == .left)
         return geometry.estimatedBadgeSize()
     }
