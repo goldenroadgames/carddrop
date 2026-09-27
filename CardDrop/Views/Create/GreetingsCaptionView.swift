@@ -425,6 +425,10 @@ private struct ExtrudedBigWordText: View {
 
 struct GreetingsCaptionView: View {
     let word: String
+    // Raw, user-typed script line (GreetingsOverlay.scriptText) — the actual
+    // rendered/measured string is GreetingsGeometry.displayScriptText(_:) of
+    // this, which adds the nbsp lead-in and forces lowercase.
+    let rawScriptText: String
     let preset: GreetingsPreset
     let bigWordFontSize: CGFloat   // fixed, absolute — no shrink-to-fit
     let scriptFontSize: CGFloat    // fixed, absolute — solved by the caller for a target "greetings from" width
@@ -456,7 +460,7 @@ struct GreetingsCaptionView: View {
     var scriptBorderColor: Color = .clear
 
     var body: some View {
-        let g = GreetingsGeometry(word: word, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: printScale)
+        let g = GreetingsGeometry(word: word, scriptText: rawScriptText, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: printScale)
         // Proportional to bigWordFontSize (not scriptFontSize, which never
         // changes) so the visual gap stays consistent regardless of word
         // length — previously a fixed scriptFontSize-based pull represented
@@ -468,7 +472,7 @@ struct GreetingsCaptionView: View {
         let bigWordPull = g.bigWordFontSize * (g.wordCount <= 5 ? 0.0 : 0.1)
         let scriptPull = g.bigWordFontSize * (isLandscape ? 0.2 : 0.2)
         let badgeHPad = g.bigWordFontSize * 0.06 + extraHorizontalPad * printScale
-        let scriptText = "\u{00A0}\u{00A0}greetings from"
+        let scriptText = g.scriptText
 
         // Top/bottom margins, fixed print-scale px, measured to the true
         // highest point of "greetings from" and the true lowest point of the
@@ -582,6 +586,7 @@ struct GreetingsCaptionView: View {
 
 private struct GreetingsBadgeRenderKey: Equatable {
     let word: String
+    let scriptText: String
     let presetID: String
     let fixedPosition: GreetingsFixedPosition
     let badgeColorChoice: GreetingsBadgeColor
@@ -611,15 +616,15 @@ struct GreetingsCaptionItemView: View {
     private var displayScale: CGFloat { canvasSize.width / referenceWidth }
 
     private var currentKey: GreetingsBadgeRenderKey {
-        GreetingsBadgeRenderKey(word: overlay.word, presetID: overlay.presetID, fixedPosition: overlay.fixedPosition, badgeColorChoice: overlay.badgeColorChoice, scriptColorChoice: overlay.scriptColorChoice, haloEnabled: overlay.haloEnabled, isLandscape: isLandscape)
+        GreetingsBadgeRenderKey(word: overlay.word, scriptText: overlay.scriptText, presetID: overlay.presetID, fixedPosition: overlay.fixedPosition, badgeColorChoice: overlay.badgeColorChoice, scriptColorChoice: overlay.scriptColorChoice, haloEnabled: overlay.haloEnabled, isLandscape: isLandscape)
     }
 
     // Only used as a placeholder to solve initial placement for the very
     // first frame, before the real bitmap (and its exact size) is ready.
     private var fallbackSize: CGSize {
-        let scriptFontSize = GreetingsGeometry.scriptFontSize(isLandscape: isLandscape, scale: 1.0)
-        let bigWordFontSize = GreetingsGeometry.bigWordFontSize(forLetterHeight: 225, maxBadgeWidth: referenceWidth - 2 * GreetingsBadgeRenderer.cardEdgeClearance, word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0)
-        let geometry = GreetingsGeometry(word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0, isTilt: overlay.fixedPosition == .left)
+        let scriptFontSize = GreetingsGeometry.scriptFontSize(for: overlay.scriptText, isLandscape: isLandscape, scale: 1.0)
+        let bigWordFontSize = GreetingsGeometry.bigWordFontSize(forLetterHeight: 225, maxBadgeWidth: referenceWidth - 2 * GreetingsBadgeRenderer.cardEdgeClearance, word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0)
+        let geometry = GreetingsGeometry(word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0, isTilt: overlay.fixedPosition == .left)
         return geometry.estimatedBadgeSize()
     }
 
@@ -773,11 +778,26 @@ struct GreetingsCaptionEditPanel: View {
     // layer's own top edge, or just the plain back layer — only really
     // visible with Tilt, which is why its toggle sits next to that button.
     @Binding var photoMirrorEnabled: Bool
+    // "Put subject in front" — whether a cutout already exists (button reads
+    // as active/toggled-on) and whether one is currently being computed
+    // (button shows a spinner and ignores taps meanwhile). The actual
+    // segmentation work happens in the parent step view, not here.
+    var isSubjectCutoutActive: Bool
+    var isGeneratingSubjectCutout: Bool
+    var onToggleSubjectCutout: () -> Void
     var onDelete: () -> Void
     var onDone: () -> Void
 
     @FocusState private var textFocused: Bool
-    private let charLimit = 20
+    private let wordCharLimit = 20
+    // Script line ("greetings from" by default) — a full phrase rather than
+    // a single word, so it gets more room than wordCharLimit. Its rendered
+    // WIDTH is always forced to a fixed target (GreetingsGeometry.
+    // scriptFontSize solves font size against that target for whatever text
+    // is present) rather than wrapping/overflowing, so this cap exists for
+    // legibility (keeping the auto-shrunk font from getting too small), not
+    // to prevent physical overflow.
+    private let scriptCharLimit = 25
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -786,7 +806,16 @@ struct GreetingsCaptionEditPanel: View {
             // toggle (halo's own color is fixed per swatch — see
             // GreetingsScriptColor.haloColor — this just turns it on/off).
             HStack(spacing: 8) {
-                Text("Greetings").font(.caption).foregroundColor(.secondary)
+                // Wider than a plain label, but no explicit frame — TextField
+                // greedily fills whatever space is left after the swatches/
+                // Halo pill take their fixed widths, same as any HStack with
+                // one flexible + several fixed-size children.
+                TextField("greetings from", text: $overlay.scriptText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+                    .onChange(of: overlay.scriptText) { _, new in
+                        if new.count > scriptCharLimit { overlay.scriptText = String(new.prefix(scriptCharLimit)) }
+                    }
                 HStack(spacing: 6) {
                     ForEach(GreetingsScriptColor.allCases) { choice in
                         // Nothing is highlighted until the user explicitly
@@ -822,7 +851,7 @@ struct GreetingsCaptionEditPanel: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($textFocused)
                     .onChange(of: overlay.word) { _, new in
-                        if new.count > charLimit { overlay.word = String(new.prefix(charLimit)) }
+                        if new.count > wordCharLimit { overlay.word = String(new.prefix(wordCharLimit)) }
                     }
             }
 
@@ -888,6 +917,32 @@ struct GreetingsCaptionEditPanel: View {
                         .onTapGesture { canvasBackgroundColor = choice }
                     }
                 }
+            }
+
+            // Row 3b: "Put subject in front" — cuts the photo's main
+            // subject out (on-device Vision segmentation) and inserts it as
+            // a read-only layer directly above this banner, so the subject
+            // appears to stand in front of it. Tapping again while active
+            // removes that layer. Silent no-op if segmentation fails or
+            // finds no subject — no error shown, per spec.
+            HStack(spacing: 8) {
+                Button(action: onToggleSubjectCutout) {
+                    HStack(spacing: 6) {
+                        if isGeneratingSubjectCutout {
+                            ProgressView().scaleEffect(0.7)
+                        } else {
+                            Image(systemName: isSubjectCutoutActive ? "person.crop.rectangle.fill" : "person.crop.rectangle")
+                        }
+                        Text("Put subject in front")
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 12)
+                    .frame(height: 30)
+                }
+                .background(isSubjectCutoutActive ? Color.accentColor : Color(.secondarySystemBackground))
+                .foregroundColor(isSubjectCutoutActive ? .white : .primary)
+                .cornerRadius(999)
+                .disabled(isGeneratingSubjectCutout)
             }
 
             // Row 4: background opacity — full right (1.0) is fully opaque,

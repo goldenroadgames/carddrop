@@ -99,6 +99,29 @@ enum TailHPosition: Int, CaseIterable {
     }
 }
 
+// MARK: - Text Halo Color  (same "ring of offset copies" technique as the
+// Greetings banner's script-text halo — see TextOverlayBubbleView.body —
+// but user-choosable rather than tied to a fixed script-color swatch table,
+// and off (.transparent) by default.)
+
+enum TextHaloColor: String, CaseIterable, Identifiable {
+    case transparent, black, white, yellow, red, blue, green
+
+    var id: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .transparent: return .clear
+        case .black:       return .black
+        case .white:        return .white
+        case .yellow:       return .greetingsScriptYellow
+        case .red:          return .greetingsRed
+        case .blue:         return .greetingsBlue
+        case .green:        return .greetingsGreen
+        }
+    }
+}
+
 // MARK: - Model
 
 struct TextOverlay: Identifiable {
@@ -114,6 +137,12 @@ struct TextOverlay: Identifiable {
     var bgColor: Color
     var tailHPosition: TailHPosition = .left  // left/right — cycled by the edit panel button
     var tailFlippedV: Bool            // mirror tail top↔bottom (speech only)
+    // Whether the Box/Speech/Thought background shape draws its outline —
+    // on by default (matches the look every existing overlay already has).
+    var borderEnabled: Bool = true
+    // Halo behind the text glyphs themselves (independent of the bgStyle
+    // shape's own border above) — off (.transparent) by default.
+    var haloColorChoice: TextHaloColor = .transparent
 
     static let availableFonts: [(name: String, displayName: String)] = [
         ("Georgia",            "Georgia"),
@@ -159,7 +188,7 @@ struct TextOverlay: Identifiable {
         normalizedPosition = position
         normalizedWidth    = 0.5
         fontName           = "Georgia"
-        fontSize           = 12
+        fontSize           = 20
         self.canvasWidth   = canvasWidth
         textColor          = .black
         bgStyle            = .box
@@ -253,14 +282,44 @@ struct TextOverlayBubbleView: View {
     }
 
     var body: some View {
-        // Modifier order matters: .frame(width:) applied directly to the raw
-        // Text BEFORE padding/background, not after — an outer .frame
-        // wrapping padding+background proposes a narrower width down to
-        // Text than this does for the mathematically "same" normalizedWidth,
-        // causing an earlier/different wrap point.
+        ZStack {
+            // Halo — same "ring of offset copies, zero blur" technique as
+            // the Greetings banner's script-text halo (see
+            // GreetingsCaptionView.body), just with a user-chosen color
+            // instead of a fixed per-swatch table, and scaled off THIS
+            // overlay's own scaledFontSize rather than scriptFontSize so it
+            // tracks the font-size slider. Skipped entirely (no extra
+            // copies rendered) when off — the default — so existing
+            // overlays render exactly as before.
+            if overlay.haloColorChoice != .transparent {
+                let haloRadius = scaledFontSize * 0.06
+                ForEach(Array(stride(from: 0.0, to: 360.0, by: 15.0)), id: \.self) { angle in
+                    let rad = angle * .pi / 180
+                    textView
+                        .foregroundColor(overlay.haloColorChoice.color)
+                        .offset(x: cos(rad) * haloRadius, y: sin(rad) * haloRadius)
+                }
+            }
+            textView
+                .foregroundColor(overlay.textColor)
+        }
+        .padding(.horizontal, basePadH + cloudExtraHPadding)
+        .padding(.top,    basePadV + cloudExtraVPadding + topPad)
+        .padding(.bottom, basePadV + cloudExtraVPadding + botPad)
+        .background(bgShape)
+    }
+
+    // Every halo copy plus the real text share this exact same
+    // font/alignment/frame/fixedSize pipeline (only foregroundColor/offset
+    // differ per copy) — this is what guarantees all of them wrap
+    // identically. Modifier order matters: .frame(width:) applied directly
+    // here BEFORE the outer ZStack's padding/background, not after — an
+    // outer .frame wrapping padding+background proposes a narrower width
+    // down to Text than this does for the mathematically "same"
+    // normalizedWidth, causing an earlier/different wrap point.
+    private var textView: some View {
         Text(overlay.text.isEmpty ? " " : overlay.text)
             .font(textFont)
-            .foregroundColor(overlay.textColor)
             .multilineTextAlignment(overlay.bgStyle == .none ? .leading : .center)
             .frame(width: boxWidth, alignment: overlay.bgStyle == .none ? .leading : .center)
             // Keeps width authoritative (wrapping still happens at
@@ -275,10 +334,6 @@ struct TextOverlayBubbleView: View {
             // silently truncates to a single line once the true wrapped
             // height exceeds that small ambient proposal.
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, basePadH + cloudExtraHPadding)
-            .padding(.top,    basePadV + cloudExtraVPadding + topPad)
-            .padding(.bottom, basePadV + cloudExtraVPadding + botPad)
-            .background(bgShape)
     }
 
     @ViewBuilder
@@ -289,7 +344,11 @@ struct TextOverlayBubbleView: View {
         case .box:
             RoundedRectangle(cornerRadius: 30 * scale)
                 .fill(overlay.bgColor)
-                .overlay(RoundedRectangle(cornerRadius: 30 * scale).stroke(Color.black, lineWidth: 3 * scale))
+                .overlay {
+                    if overlay.borderEnabled {
+                        RoundedRectangle(cornerRadius: 30 * scale).stroke(Color.black, lineWidth: 3 * scale)
+                    }
+                }
         case .speech:
             // Unlike the old body+tail-as-two-subpaths version, the traced
             // SVG artwork is ONE continuous outer contour, so a plain
@@ -302,16 +361,24 @@ struct TextOverlayBubbleView: View {
             let bubble = SpeechBubbleShape(tailPosition: overlay.tailHPosition, tailOnBottom: !overlay.tailFlippedV, scale: scale)
             bubble
                 .fill(overlay.bgColor)
-                .overlay(bubble.stroke(Color.black, lineWidth: 3 * scale))
+                .overlay {
+                    if overlay.borderEnabled {
+                        bubble.stroke(Color.black, lineWidth: 3 * scale)
+                    }
+                }
         case .thought:
             // Same inflate/fill-behind reasoning as .speech above — a plain
             // .stroke() on the cloud would draw each circle's full boundary,
-            // including lines cutting through the interior union.
+            // including lines cutting through the interior union. Border
+            // off just means skipping the inflated black copy entirely,
+            // leaving the plain bg-colored cloud with no rim.
             // No left/right tail control for thought bubbles — always dead
             // center — but up/down still selects top vs bottom.
             ZStack {
-                ThoughtBubbleShape(tailOnBottom: !overlay.tailFlippedV, inflate: 3, scale: scale)
-                    .fill(Color.black)
+                if overlay.borderEnabled {
+                    ThoughtBubbleShape(tailOnBottom: !overlay.tailFlippedV, inflate: 3, scale: scale)
+                        .fill(Color.black)
+                }
                 ThoughtBubbleShape(tailOnBottom: !overlay.tailFlippedV, scale: scale)
                     .fill(overlay.bgColor)
             }

@@ -36,6 +36,7 @@ struct BorderStepView: View {
                 qrOverlays: draft.qrOverlays,
                 burstOverlays: draft.burstOverlays,
                 greetingsOverlays: draft.greetingsOverlays,
+                subjectCutoutImage: draft.subjectCutoutComposedImage,
                 size: frameSize,
                 border: draft.border,
                 orientation: draft.orientation,

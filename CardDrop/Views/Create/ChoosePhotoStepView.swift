@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // Minimum pixel dimensions for acceptable print quality on a 6x9 postcard at ~200 DPI.
 // 300 DPI ideal = 1800×2700; we warn below that but still allow proceeding.
@@ -21,6 +22,7 @@ struct ChoosePhotoStepView: View {
 
     @State private var isPickerPresented = false
     @State private var isCameraPresented = false
+    @State private var isFileImporterPresented = false
     @State private var isModerating = false
     @State private var pendingLowResImage: UIImage? = nil
     @State private var showLowResAlert = false
@@ -158,8 +160,9 @@ struct ChoosePhotoStepView: View {
             // Auto-open the library picker the first time this step is
             // reached with no photo yet — safe to do now (unlike before
             // takePhotoSection existed) because the picker sheet stops at
-            // .fraction(0.85), leaving "Take a Photo"/"Choose Photo" above
-            // it visible and tappable if the user dismisses without picking.
+            // .fraction(0.78), leaving "Take a Photo"/"Import a
+            // File"/"Choose Photo" above it visible and tappable if the
+            // user dismisses without picking.
             if draft.image == nil {
                 isPickerPresented = true
             }
@@ -190,7 +193,7 @@ struct ChoosePhotoStepView: View {
                 },
                 onCancel: { isPickerPresented = false }
             )
-            .presentationDetents([.fraction(0.86)])
+            .presentationDetents([.fraction(0.78)])
             .presentationBackgroundInteraction(.enabled)
             .ignoresSafeArea()
         }
@@ -457,7 +460,7 @@ struct ChoosePhotoStepView: View {
     // Pinned above the rest of the VStack, only while no photo is chosen —
     // collapses to zero height (same gating as every other section here)
     // once draft.image is set. The library picker below it is a custom
-    // PHPicker wrapper presented at .fraction(0.87) specifically so it
+    // PHPicker wrapper presented at .fraction(0.78) specifically so it
     // never covers this section — see PhotoLibraryPickerView.swift.
     @ViewBuilder
     private var takePhotoSection: some View {
@@ -484,6 +487,23 @@ struct ChoosePhotoStepView: View {
             // fails to present rather than erroring, so guard it here
             // instead.
             .disabled(isModerating || !CameraCaptureView.isAvailable)
+
+            Button {
+                isPickerPresented = false
+                isFileImporterPresented = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "folder.fill")
+                    Text("Import a File")
+                }
+                .font(.system(size: 17, weight: .semibold))
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(isModerating ? Color.gray : Color.brandBlue)
+                .foregroundColor(.white)
+                .cornerRadius(999)
+            }
+            .disabled(isModerating)
 
             Button {
                 isPickerPresented = true
@@ -513,6 +533,20 @@ struct ChoosePhotoStepView: View {
                 onCancel: { isCameraPresented = false }
             )
             .ignoresSafeArea()
+        }
+        // Files app / iCloud Drive / any cloud provider with a Files
+        // document-provider extension (Google Drive, Dropbox, OneDrive) —
+        // NOT Google Photos itself, which has no such provider.
+        .fileImporter(
+            isPresented: $isFileImporterPresented,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            let didAccess = url.startAccessingSecurityScopedResource()
+            defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else { return }
+            handlePicked(image: image)
         }
     }
 

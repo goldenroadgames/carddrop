@@ -41,6 +41,7 @@ class DraftManager: ObservableObject {
         )
 
         saveImageToDisk(draft.image, name: "\(snapshot.id)_original", quality: 1.0)  // full quality — print source
+        savePNGToDisk(draft.subjectCutoutImage, name: "\(snapshot.id)_subjectCutout")
 
         if let idx = drafts.firstIndex(where: { $0.id == snapshot.id }) {
             drafts[idx] = snapshot
@@ -57,6 +58,7 @@ class DraftManager: ObservableObject {
         deleteImageFromDisk(name: "\(id)_front")
         deleteImageFromDisk(name: "\(id)_back")
         deleteImageFromDisk(name: "\(id)_back6x9")
+        deletePNGFromDisk(name: "\(id)_subjectCutout")
         persistIndex()
     }
 
@@ -69,7 +71,8 @@ class DraftManager: ObservableObject {
     /// Reconstruct a live PostcardDraft + the step to resume at.
     func load(_ snapshot: PostcardDraftSnapshot) -> (PostcardDraft, Int) {
         let original = loadImageFromDisk(name: "\(snapshot.id)_original")
-        return (snapshot.toPostcardDraft(originalImage: original, composedImage: nil),
+        let subjectCutout = loadPNGFromDisk(name: "\(snapshot.id)_subjectCutout")
+        return (snapshot.toPostcardDraft(originalImage: original, composedImage: nil, subjectCutoutImage: subjectCutout),
                 snapshot.currentStep)
     }
 
@@ -101,6 +104,10 @@ class DraftManager: ObservableObject {
                 let dst = targetDir.appendingPathComponent("\(snapshot.id)\(suffix).jpg")
                 try? FileManager.default.copyItem(at: src, to: dst)
             }
+            // PNG, not JPEG — see savePNGToDisk's doc comment.
+            let cutoutSrc = anonDir.appendingPathComponent("\(snapshot.id)_subjectCutout.png")
+            let cutoutDst = targetDir.appendingPathComponent("\(snapshot.id)_subjectCutout.png")
+            try? FileManager.default.copyItem(at: cutoutSrc, to: cutoutDst)
             targetSnapshots.insert(snapshot, at: 0)
         }
 
@@ -227,5 +234,29 @@ class DraftManager: ObservableObject {
 
     private func deleteImageFromDisk(name: String) {
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(name).jpg"))
+    }
+
+    // PNG variants — JPEG has no alpha channel, so the subject-cutout image
+    // (transparent outside the isolated subject) needs its own pair of
+    // helpers rather than reusing saveImageToDisk/loadImageFromDisk above.
+    // `image == nil` deletes any existing file instead of a no-op, so
+    // removing a cutout (the toggle-off path) doesn't leave a stale PNG that
+    // would make a future load() incorrectly restore it.
+    private func savePNGToDisk(_ image: UIImage?, name: String) {
+        guard let image, let data = image.pngData() else {
+            deletePNGFromDisk(name: name)
+            return
+        }
+        try? data.write(to: directory.appendingPathComponent("\(name).png"), options: .atomic)
+    }
+
+    func loadPNGFromDisk(name: String) -> UIImage? {
+        let url = directory.appendingPathComponent("\(name).png")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return UIImage(data: data)
+    }
+
+    private func deletePNGFromDisk(name: String) {
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("\(name).png"))
     }
 }

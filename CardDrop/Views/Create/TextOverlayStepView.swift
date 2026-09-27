@@ -27,6 +27,7 @@ struct TextOverlayStepView: View {
     @State private var cachedFilteredImage: UIImage? = nil
     @State private var lastImgSize: CGSize = .zero
     @State private var keyboardHeight: CGFloat = 0
+    @State private var isGeneratingSubjectCutout = false
 
     private var isEditing: Bool {
         selectedIndex != nil || selectedQRIndex != nil || selectedBurstIndex != nil || selectedGreetingsIndex != nil
@@ -378,6 +379,28 @@ struct TextOverlayStepView: View {
                             )
                         }
 
+                        // "Put subject in front" layer — drawn directly
+                        // above the Greetings banner, below Text/Burst/QR
+                        // (see Z-order comment above). Uses the exact same
+                        // scaleEffect/offset as the front photo layer above
+                        // (lines ~269-305) so it tracks pan/zoom in lockstep
+                        // with the photo it was cut from — it has no drag/
+                        // resize/rotate gesture of its own; there's nothing
+                        // to attach one to.
+                        if let cutout = draft.subjectCutoutImage {
+                            Image(uiImage: cutout)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: imgSize.width, height: imgSize.height)
+                                .scaleEffect(draft.imageScale * gestureScale)
+                                .offset(
+                                    x: draft.imageOffset.width * imgSize.width + gestureDrag.width,
+                                    y: draft.imageOffset.height * imgSize.height + gestureDrag.height
+                                )
+                                .clipped()
+                                .allowsHitTesting(false)
+                        }
+
                         ForEach(draft.textOverlays) { overlay in
                             TextOverlayItemView(
                                 overlay: Binding(
@@ -555,6 +578,44 @@ struct TextOverlayStepView: View {
             ? CGSize(width: CardRenderer.frontLongSideBleed, height: CardRenderer.frontShortSideBleed)
             : CGSize(width: CardRenderer.frontShortSideBleed, height: CardRenderer.frontLongSideBleed)
         draft.renderComposedImage(frameSize: imageAreaSize(in: referenceSize))
+        rerenderSubjectCutoutComposedImage()
+    }
+
+    // Keeps subjectCutoutComposedImage (used by the print bake / any preview
+    // built from PostcardFrontCanvas) baked at the same size/transform as
+    // composedImage itself, any time either could have changed.
+    private func rerenderSubjectCutoutComposedImage() {
+        guard draft.image != nil else { return }
+        let referenceSize: CGSize = draft.orientation == .landscape
+            ? CGSize(width: CardRenderer.frontLongSideBleed, height: CardRenderer.frontShortSideBleed)
+            : CGSize(width: CardRenderer.frontShortSideBleed, height: CardRenderer.frontLongSideBleed)
+        draft.renderSubjectCutoutComposedImage(frameSize: imageAreaSize(in: referenceSize))
+    }
+
+    // "Put subject in front" toggle: tap once to segment the photo's main
+    // subject and insert it as a locked layer above the Greetings banner;
+    // tap again to remove it. No undo stack — this IS the undo, per user
+    // direction. Silent no-op on segmentation failure (no subject found,
+    // Vision error) — leaves the card exactly as it was, no error shown.
+    private func toggleSubjectCutout() {
+        if draft.subjectCutoutImage != nil {
+            draft.subjectCutoutImage = nil
+            draft.subjectCutoutComposedImage = nil
+            return
+        }
+        guard !isGeneratingSubjectCutout, let source = draft.image else { return }
+        isGeneratingSubjectCutout = true
+        let filter = draft.filter
+        DispatchQueue.global(qos: .userInitiated).async {
+            let rawCutout = SubjectCutoutService.generateCutout(from: source)
+            let filteredCutout = rawCutout.map { filter.apply(to: $0) }
+            DispatchQueue.main.async {
+                isGeneratingSubjectCutout = false
+                guard let filteredCutout else { return }
+                draft.subjectCutoutImage = filteredCutout
+                rerenderSubjectCutoutComposedImage()
+            }
+        }
     }
 
     // Guarantees the front photo layer never leaves a gap anywhere except
@@ -646,6 +707,9 @@ struct TextOverlayStepView: View {
                 ),
                 canvasBackgroundColor: $draft.canvasBackgroundColor,
                 photoMirrorEnabled: $draft.photoMirrorEnabled,
+                isSubjectCutoutActive: draft.subjectCutoutImage != nil,
+                isGeneratingSubjectCutout: isGeneratingSubjectCutout,
+                onToggleSubjectCutout: { toggleSubjectCutout() },
                 onDelete: { draft.greetingsOverlays.remove(at: idx); selectedGreetingsIndex = nil },
                 onDone: { selectedGreetingsIndex = nil }
             )
@@ -1020,6 +1084,34 @@ struct TextOverlayEditPanel: View {
                 ColorPicker("", selection: $overlay.textColor).labelsHidden()
             }
 
+            // Row: Halo — a colored ring behind the text glyphs themselves
+            // (independent of the bgStyle shape's own border, below).
+            // Transparent (off) is the default and first/leftmost swatch.
+            HStack(spacing: 8) {
+                Text("Halo").font(.caption).foregroundColor(.secondary)
+                HStack(spacing: 6) {
+                    ForEach(TextHaloColor.allCases) { choice in
+                        Group {
+                            if choice == .transparent {
+                                Image(systemName: "circle.slash")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 24, height: 24)
+                            } else {
+                                Circle().fill(choice.color)
+                                    .frame(width: 24, height: 24)
+                            }
+                        }
+                        .overlay(
+                            Circle()
+                                .stroke(Color.primary.opacity(overlay.haloColorChoice == choice ? 0.8 : 0.15),
+                                        lineWidth: overlay.haloColorChoice == choice ? 2.5 : 1)
+                        )
+                        .onTapGesture { overlay.haloColorChoice = choice }
+                    }
+                }
+            }
+
             // Row 4: BG controls, color, mirror — all in one scrollable strip
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -1032,10 +1124,6 @@ struct TextOverlayEditPanel: View {
                                 .foregroundColor(overlay.bgStyle == style ? .white : .primary)
                                 .cornerRadius(999)
                         }
-                    }
-
-                    if overlay.bgStyle != .none {
-                        ColorPicker("", selection: $overlay.bgColor).labelsHidden()
                     }
 
                     if overlay.bgStyle == .speech || overlay.bgStyle == .thought {
@@ -1066,6 +1154,27 @@ struct TextOverlayEditPanel: View {
                                 .foregroundColor(.primary)
                                 .cornerRadius(999)
                         }
+                    }
+
+                    // Border, then Color — the last two controls on this
+                    // line, color last. Matches Row 3's own pattern (Size,
+                    // Bold, Italic, then color last) so color consistently
+                    // anchors as the final control on every row in this
+                    // panel. Color moved here (after the shape icons AND
+                    // any tail controls) rather than sitting right after
+                    // the icons, since it was easy to miss/lose track of
+                    // wedged between the icons and the more visually
+                    // distinct tail-direction arrows.
+                    if overlay.bgStyle != .none {
+                        Button("Border") { overlay.borderEnabled.toggle() }
+                            .font(.system(size: 13, weight: .medium))
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 16)
+                            .frame(height: 30)
+                            .background(overlay.borderEnabled ? Color.accentColor : Color(.secondarySystemBackground))
+                            .foregroundColor(overlay.borderEnabled ? .white : .primary)
+                            .cornerRadius(999)
+                        ColorPicker("", selection: $overlay.bgColor).labelsHidden()
                     }
                 }
                 .padding(.horizontal, 2)

@@ -78,11 +78,31 @@ class PostcardDraft: ObservableObject {
     var cardID: UUID = UUID()
 
     @Published var image: UIImage? {
-        didSet { imageModeratedState = .untested }
+        // A new/replaced photo invalidates any existing subject cutout —
+        // it was masked from the OLD photo's pixels, so it no longer
+        // corresponds to anything on screen.
+        didSet { imageModeratedState = .untested; subjectCutoutImage = nil; subjectCutoutComposedImage = nil }
     }
     @Published var composedImage: UIImage? {
         didSet { imageModeratedState = .untested }
     }
+    // "Put subject in front" — Vision-segmented cutout of `image`'s main
+    // subject, same pixel size/orientation as `image`, transparent outside
+    // the subject, with `filter` already baked in so it visually matches
+    // the photo beneath it. Not independently positioned/rotated: it is
+    // always drawn using the exact same imageScale/imageOffset transform as
+    // the photo layer itself (see `renderedCutout(at:)` below and its editor
+    // counterpart), so panning/zooming the photo carries the cutout along
+    // with it automatically — no separate drag/resize/rotate handling needed.
+    @Published var subjectCutoutImage: UIImage?
+    // Baked composite at whatever frameSize composedImage was last rendered
+    // at — canvas-sized, transparent background, subject positioned exactly
+    // like the front photo layer. This is what the print bake (and any
+    // preview built from PostcardFrontCanvas) actually draws; the live
+    // editor instead renders subjectCutoutImage directly with a live
+    // scaleEffect/offset (see TextOverlayStepView), matching how the photo
+    // layer itself is handled in both places.
+    @Published var subjectCutoutComposedImage: UIImage?
     @Published var orientation: PostcardOrientation = .landscape
     @Published var imageScale: CGFloat = 1.0
     @Published var imageOffset: CGSize = .zero
@@ -194,6 +214,8 @@ class PostcardDraft: ObservableObject {
         // cardID is a fresh UUID() from PostcardDraft()
         c.image              = image
         c.composedImage      = composedImage
+        c.subjectCutoutImage = subjectCutoutImage
+        c.subjectCutoutComposedImage = subjectCutoutComposedImage
         c.orientation        = orientation
         c.imageScale         = imageScale
         c.imageOffset        = imageOffset
@@ -269,6 +291,42 @@ class PostcardDraft: ObservableObject {
     /// Renders the positioned/scaled photo into a UIImage at the postcard aspect ratio.
     func renderComposedImage(frameSize: CGSize) {
         composedImage = rendered(at: frameSize)
+    }
+
+    /// Re-bakes subjectCutoutComposedImage (see its own doc comment) at the
+    /// same frameSize composedImage itself is baked at — call any time
+    /// subjectCutoutImage changes, or alongside renderComposedImage() after
+    /// a pan/zoom gesture, so the two stay pixel-aligned.
+    func renderSubjectCutoutComposedImage(frameSize: CGSize) {
+        subjectCutoutComposedImage = renderedCutout(at: frameSize)
+    }
+
+    private func renderedCutout(at size: CGSize) -> UIImage? {
+        guard let cutout = subjectCutoutImage, let image, size.width > 0, size.height > 0 else { return nil }
+
+        let imageSize = image.size
+        guard imageSize.width > 0, imageSize.height > 0 else { return nil }
+        let fillScale = max(size.width / imageSize.width, size.height / imageSize.height)
+        let totalScale = fillScale * imageScale
+        let scaledWidth = imageSize.width * totalScale
+        let scaledHeight = imageSize.height * totalScale
+
+        // Identical drawRect math to rendered(at:)'s front layer — this is
+        // what keeps the cutout pixel-aligned with the photo beneath it.
+        let drawRect = CGRect(
+            x: (size.width - scaledWidth) / 2 + imageOffset.width * size.width,
+            y: (size.height - scaledHeight) / 2 + imageOffset.height * size.height,
+            width: scaledWidth,
+            height: scaledHeight
+        )
+
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false  // must keep alpha — everything outside the subject stays transparent
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { ctx in
+            ctx.cgContext.clip(to: CGRect(origin: .zero, size: size))
+            cutout.draw(in: drawRect)
+        }
     }
 
     private func rendered(at size: CGSize) -> UIImage? {

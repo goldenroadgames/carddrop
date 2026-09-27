@@ -27,6 +27,7 @@ struct CardFlipPreviewView: View {
                                 qrOverlays: draft.qrOverlays,
                                 burstOverlays: draft.burstOverlays,
                                 greetingsOverlays: draft.greetingsOverlays,
+                                subjectCutoutImage: draft.subjectCutoutComposedImage,
                                 size: frontFrame
                             )
                             .frame(width: frontFrame.width, height: frontFrame.height)

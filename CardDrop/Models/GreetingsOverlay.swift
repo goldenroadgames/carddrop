@@ -174,13 +174,13 @@ extension GreetingsOverlay {
         guard let overlay = overlays.first else { return 0 }
         let referenceWidth: CGFloat = isLandscape ? 2775 : 1875
         let referenceHeight: CGFloat = isLandscape ? 1875 : 2775
-        let scriptFontSize = GreetingsGeometry.scriptFontSize(isLandscape: isLandscape, scale: 1.0)
+        let scriptFontSize = GreetingsGeometry.scriptFontSize(for: overlay.scriptText, isLandscape: isLandscape, scale: 1.0)
         let bigWordFontSize = GreetingsGeometry.bigWordFontSize(
             forLetterHeight: 225, maxBadgeWidth: referenceWidth - 2 * GreetingsBadgeRenderer.cardEdgeClearance,
-            word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize,
+            word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize,
             isLandscape: isLandscape, printScale: 1.0)
         let geometry = GreetingsGeometry(
-            word: overlay.word, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize,
+            word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize,
             scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0,
             isTilt: overlay.fixedPosition == .left)
         let badgeSize = geometry.estimatedBadgeSize()
@@ -268,6 +268,11 @@ enum GreetingsScriptColor: String, CaseIterable, Identifiable {
 struct GreetingsOverlay: Identifiable {
     var id: UUID = UUID()
     var word: String = ""
+    // The script line above the big word — defaults to "greetings from" but
+    // user-editable (see GreetingsCaptionEditPanel's Row 1 text field).
+    // Rendered exactly as typed, letter case included; clearing it entirely
+    // hides the script line (see GreetingsGeometry.displayScriptText).
+    var scriptText: String = "greetings from"
     var presetID: String
     var fixedPosition: GreetingsFixedPosition = .left
     // Background badge opacity — slider-controlled, 0 (fully clear) to 1
@@ -306,15 +311,33 @@ struct GreetingsGeometry {
     let isTilt: Bool             // Tilt gets a taller bottom margin than Center — see estimatedBadgeSize()
     let printScale: CGFloat      // canvas-units-per-print-pixel — needed so the fixed-print-pixel `margin` in estimatedBadgeSize() matches GreetingsCaptionView's real render exactly
     let bigWordWidth: CGFloat    // raw measured width of the big word at bigWordFontSize
-    let scriptTextWidth: CGFloat // raw measured width of "greetings from" at scriptFontSize — the script line's own true width, NOT contentWidth (which is usually dominated by the much-wider big word)
+    let scriptText: String       // the full on-canvas script string (with its leading double-nbsp lead-in), e.g. "  greetings from" — see displayScriptText(_:)
+    let scriptTextWidth: CGFloat // raw measured width of scriptText at scriptFontSize — the script line's own true width, NOT contentWidth (which is usually dominated by the much-wider big word)
     let contentWidth: CGFloat    // max(script line width, big word's own padded canvas width) — the width the badge/script frame need to fully enclose both
 
-    // "greetings from" is the literal on-canvas string (with its leading
-    // double-nbsp lead-in) that scriptFontSize is solved against — kept here
-    // so the solver and the actual rendered text can never drift apart.
-    static let scriptText = "\u{00A0}\u{00A0}greetings from"
+    // Double-nbsp lead-in kept in front of the script text — purely a visual
+    // left-indent, independent of what the user typed.
+    static let scriptPrefix = "\u{00A0}\u{00A0}"
 
-    init(word: String, fontName: String, bigWordFontSize: CGFloat, scriptFontSize: CGFloat, isLandscape: Bool, printScale: CGFloat, isTilt: Bool = false) {
+    // The user-editable script line (GreetingsOverlay.scriptText, default
+    // "greetings from") is rendered exactly as typed — including genuinely
+    // blank (hides the script line entirely) if the user clears the field.
+    static func displayScriptText(_ rawScriptText: String) -> String {
+        let trimmed = rawScriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "" : scriptPrefix + trimmed
+    }
+
+    // Used ONLY to solve the script line's font size / vertical layout
+    // metrics (never for what's actually drawn) — falls back to the default
+    // phrase when blank so the badge's height/spacing stays stable rather
+    // than trying to divide by a zero-width measurement. See
+    // scriptFontSize(for:isLandscape:scale:).
+    private static func metricsScriptText(_ rawScriptText: String) -> String {
+        let trimmed = rawScriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return scriptPrefix + (trimmed.isEmpty ? "greetings from" : trimmed)
+    }
+
+    init(word: String, scriptText rawScriptText: String, fontName: String, bigWordFontSize: CGFloat, scriptFontSize: CGFloat, isLandscape: Bool, printScale: CGFloat, isTilt: Bool = false) {
         let effectiveWord = word.isEmpty ? "Home" : word.uppercased()
         displayWord = effectiveWord
         wordCount = word.count
@@ -323,6 +346,7 @@ struct GreetingsGeometry {
         self.isLandscape = isLandscape
         self.isTilt = isTilt
         self.printScale = printScale
+        self.scriptText = GreetingsGeometry.displayScriptText(rawScriptText)
 
         let w = BurstGeometry.measureText(effectiveWord, fontName: fontName, size: bigWordFontSize)
         bigWordWidth = w
@@ -335,7 +359,7 @@ struct GreetingsGeometry {
         let bigWordPad = max(shadowOffsetX, shadowOffsetY) + outlineWidth + outlineWidth * 4 / 3 + 4
         let bigWordCanvasWidth = w + bigWordPad * 2
 
-        scriptTextWidth = BurstGeometry.measureText(GreetingsGeometry.scriptText, fontName: GreetingsGeometry.scriptFontName, size: scriptFontSize)
+        scriptTextWidth = BurstGeometry.measureText(self.scriptText, fontName: GreetingsGeometry.scriptFontName, size: scriptFontSize)
 
         contentWidth = max(bigWordCanvasWidth, scriptTextWidth)
     }
@@ -346,10 +370,10 @@ struct GreetingsGeometry {
     // size across every card regardless of the greeting word's length.
     // Text width is linear in font size for a fixed string, so this solves
     // directly from one reference measurement rather than iterating.
-    static func scriptFontSize(isLandscape: Bool, scale: CGFloat) -> CGFloat {
+    static func scriptFontSize(for rawScriptText: String, isLandscape: Bool, scale: CGFloat) -> CGFloat {
         let targetWidth = (isLandscape ? 1000 : 800) * scale
         let referenceSize: CGFloat = 100
-        let referenceWidth = BurstGeometry.measureText(scriptText, fontName: scriptFontName, size: referenceSize)
+        let referenceWidth = BurstGeometry.measureText(metricsScriptText(rawScriptText), fontName: scriptFontName, size: referenceSize)
         guard referenceWidth > 0 else { return targetWidth }
         return targetWidth * referenceSize / referenceWidth
     }
@@ -425,11 +449,11 @@ struct GreetingsGeometry {
     // rather than overflowing the card. Badge width isn't perfectly linear
     // in font size (fixed padding terms), so this takes a few correction
     // passes to converge.
-    static func bigWordFontSize(forLetterHeight desiredHeight: CGFloat, maxBadgeWidth: CGFloat, word: String, fontName: String, scriptFontSize: CGFloat, isLandscape: Bool, printScale: CGFloat) -> CGFloat {
+    static func bigWordFontSize(forLetterHeight desiredHeight: CGFloat, maxBadgeWidth: CGFloat, word: String, scriptText: String, fontName: String, scriptFontSize: CGFloat, isLandscape: Bool, printScale: CGFloat) -> CGFloat {
         var fontSize = bigWordFontSize(forLetterHeight: desiredHeight)
         guard maxBadgeWidth > 0 else { return fontSize }
         for _ in 0..<4 {
-            let g = GreetingsGeometry(word: word, fontName: fontName, bigWordFontSize: fontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: printScale)
+            let g = GreetingsGeometry(word: word, scriptText: scriptText, fontName: fontName, bigWordFontSize: fontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: printScale)
             let badgeWidth = g.estimatedBadgeSize().width
             guard badgeWidth > maxBadgeWidth else { break }
             fontSize *= maxBadgeWidth / badgeWidth

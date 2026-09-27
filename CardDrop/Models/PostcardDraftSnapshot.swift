@@ -44,6 +44,8 @@ struct TextOverlaySnapshot: Codable {
     var rotation: Double
     var isBold:   Bool
     var isItalic: Bool
+    var borderEnabled: Bool?       // Optional for backward-compatible decode
+    var haloColorRaw: String?      // Optional for backward-compatible decode
 
     init(_ overlay: TextOverlay) {
         id            = overlay.id
@@ -60,6 +62,8 @@ struct TextOverlaySnapshot: Codable {
         rotation      = overlay.rotation
         isBold        = overlay.isBold
         isItalic      = overlay.isItalic
+        borderEnabled = overlay.borderEnabled
+        haloColorRaw  = overlay.haloColorChoice.rawValue
 
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         UIColor(overlay.textColor).getRed(&r, green: &g, blue: &b, alpha: &a)
@@ -84,6 +88,8 @@ struct TextOverlaySnapshot: Codable {
         o.rotation         = rotation
         o.isBold           = isBold
         o.isItalic         = isItalic
+        o.borderEnabled    = borderEnabled ?? true
+        o.haloColorChoice  = haloColorRaw.flatMap { TextHaloColor(rawValue: $0) } ?? .transparent
         return o
     }
 }
@@ -129,13 +135,21 @@ struct GreetingsOverlaySnapshot: Codable {
     var presetID: String
     var fixedPositionRaw: String?    // Optional for backward-compatible decode
     var backgroundOpacity: Double?   // Optional for backward-compatible decode
+    var scriptText: String?          // Optional for backward-compatible decode
+    var badgeColorChoiceRaw: String?    // Optional for backward-compatible decode
+    var scriptColorChoiceRaw: String?   // Optional for backward-compatible decode
+    var haloEnabled: Bool?               // Optional for backward-compatible decode
 
     init(_ overlay: GreetingsOverlay) {
-        id                = overlay.id
-        word              = overlay.word
-        presetID          = overlay.presetID
-        fixedPositionRaw  = overlay.fixedPosition.rawValue
-        backgroundOpacity = Double(overlay.backgroundOpacity)
+        id                   = overlay.id
+        word                 = overlay.word
+        presetID             = overlay.presetID
+        fixedPositionRaw     = overlay.fixedPosition.rawValue
+        backgroundOpacity    = Double(overlay.backgroundOpacity)
+        scriptText           = overlay.scriptText
+        badgeColorChoiceRaw  = overlay.badgeColorChoice.rawValue
+        scriptColorChoiceRaw = overlay.scriptColorChoice?.rawValue
+        haloEnabled          = overlay.haloEnabled
     }
 
     var toGreetingsOverlay: GreetingsOverlay {
@@ -144,6 +158,10 @@ struct GreetingsOverlaySnapshot: Codable {
         o.word              = word
         o.fixedPosition     = fixedPositionRaw.flatMap { GreetingsFixedPosition(rawValue: $0) } ?? .center
         o.backgroundOpacity = backgroundOpacity.map { CGFloat($0) } ?? 1.0
+        o.scriptText        = scriptText ?? "greetings from"
+        o.badgeColorChoice  = badgeColorChoiceRaw.flatMap { GreetingsBadgeColor(rawValue: $0) } ?? .blue
+        o.scriptColorChoice = scriptColorChoiceRaw.flatMap { GreetingsScriptColor(rawValue: $0) } ?? .yellow
+        o.haloEnabled       = haloEnabled ?? false
         return o
     }
 }
@@ -226,6 +244,10 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
     // Whether image files exist on disk for this draft
     var hasOriginalImage: Bool
     var hasComposedImage: Bool
+    // "Put subject in front" — whether a cutout image exists on disk for
+    // this draft. Optional for backward-compatible decode of snapshots
+    // saved before this feature existed.
+    var hasSubjectCutoutImage: Bool?
 
     // True for cards restored from Supabase — draft design data is unavailable
     var isRestoredFromServer: Bool?
@@ -297,15 +319,21 @@ struct PostcardDraftSnapshot: Identifiable, Codable {
 
         hasOriginalImage = draft.image != nil
         hasComposedImage = draft.composedImage != nil
+        hasSubjectCutoutImage = draft.subjectCutoutImage != nil
     }
 
     // MARK: Restore to live draft
 
-    func toPostcardDraft(originalImage: UIImage?, composedImage: UIImage?) -> PostcardDraft {
+    func toPostcardDraft(originalImage: UIImage?, composedImage: UIImage?, subjectCutoutImage: UIImage? = nil) -> PostcardDraft {
         let d = PostcardDraft()
         d.cardID         = cardID ?? UUID()
         d.image          = originalImage
         d.composedImage  = composedImage
+        // Set AFTER d.image — assigning d.image above clears
+        // subjectCutoutImage/subjectCutoutComposedImage via its own didSet
+        // (see PostcardDraft), so this must come after or it'd be wiped
+        // right back out.
+        d.subjectCutoutImage = subjectCutoutImage
         d.orientation    = orientationIsLandscape ? .landscape : .portrait
         d.imageScale     = CGFloat(imageScale)
         d.imageOffset    = CGSize(width: imageOffsetWidth, height: imageOffsetHeight)

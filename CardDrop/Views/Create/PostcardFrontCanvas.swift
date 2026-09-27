@@ -7,6 +7,11 @@ struct PostcardFrontCanvas: View {
     let qrOverlays: [QROverlay]
     let burstOverlays: [BurstCaptionOverlay]
     let greetingsOverlays: [GreetingsOverlay]
+    // "Put subject in front" — already baked (see PostcardDraft.
+    // renderSubjectCutoutComposedImage) to this canvas's own size, with a
+    // transparent background and the subject positioned exactly where it
+    // sits on the photo beneath it. nil when no cutout exists.
+    var subjectCutoutImage: UIImage? = nil
     let size: CGSize
     var border: PostcardBorder = .fullBleed
     var orientation: PostcardOrientation = .landscape
@@ -16,7 +21,8 @@ struct PostcardFrontCanvas: View {
     var onQRLongPress: ((String) -> Void)? = nil
 
     init(image: UIImage?, overlays: [TextOverlay], qrOverlays: [QROverlay] = [],
-         burstOverlays: [BurstCaptionOverlay] = [], greetingsOverlays: [GreetingsOverlay] = [], size: CGSize,
+         burstOverlays: [BurstCaptionOverlay] = [], greetingsOverlays: [GreetingsOverlay] = [],
+         subjectCutoutImage: UIImage? = nil, size: CGSize,
          border: PostcardBorder = .fullBleed, orientation: PostcardOrientation = .landscape,
          borderText: String = "", borderFontName: String = "Georgia", borderTextColor: Color = .black,
          onQRLongPress: ((String) -> Void)? = nil) {
@@ -25,6 +31,7 @@ struct PostcardFrontCanvas: View {
         self.qrOverlays = qrOverlays
         self.burstOverlays = burstOverlays
         self.greetingsOverlays = greetingsOverlays
+        self.subjectCutoutImage = subjectCutoutImage
         self.size = size
         self.border = border
         self.orientation = orientation
@@ -80,6 +87,16 @@ struct PostcardFrontCanvas: View {
                 }
                 ForEach(greetingsOverlays) { greeting in
                     greetingsBadgeView(greeting)
+                }
+                // "Put subject in front" — already baked/positioned to
+                // exactly this canvas's imageAreaSize (see
+                // PostcardDraft.renderSubjectCutoutComposedImage); no
+                // further transform needed here, unlike the live editor's
+                // own gesture-scaled version of this same layer.
+                if let cutout = subjectCutoutImage {
+                    Image(uiImage: cutout)
+                        .resizable()
+                        .frame(width: imageAreaSize.width, height: imageAreaSize.height)
                 }
                 ForEach(overlays) { overlay in
                     overlayView(overlay)

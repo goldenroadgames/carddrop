@@ -42,7 +42,7 @@ enum GreetingsBadgeRenderer {
     static func render(overlay: GreetingsOverlay, isLandscape: Bool) -> (image: UIImage, size: CGSize)? {
         let referenceWidth: CGFloat = isLandscape ? 2775 : 1875
         let preset = GreetingsPreset.find(overlay.presetID)
-        let scriptFontSize = GreetingsGeometry.scriptFontSize(isLandscape: isLandscape, scale: 1.0)
+        let scriptFontSize = GreetingsGeometry.scriptFontSize(for: overlay.scriptText, isLandscape: isLandscape, scale: 1.0)
         let targetHeight: CGFloat = 225  // 1in at 300dpi, printScale = 1.0
         // Cap the badge's own (unrotated) width so that, once centered
         // (.center) or rotated-and-placed (.left/Tilt, per its own math),
@@ -51,7 +51,7 @@ enum GreetingsBadgeRenderer {
         // than overflowing that guarantee.
         let bigWordFontSize = GreetingsGeometry.bigWordFontSize(
             forLetterHeight: targetHeight, maxBadgeWidth: referenceWidth - 2 * cardEdgeClearance, word: overlay.word,
-            fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize,
+            scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize,
             isLandscape: isLandscape, printScale: 1.0)
 
         // letterEdgeClearance (1/4in at 300dpi) of padding per side between
@@ -81,7 +81,7 @@ enum GreetingsBadgeRenderer {
         // caller draws that separately, live, so backgroundOpacity can be
         // dragged/animated without invalidating this cached bitmap at all.
         let view = GreetingsCaptionView(
-            word: overlay.word, preset: preset, bigWordFontSize: bigWordFontSize,
+            word: overlay.word, rawScriptText: overlay.scriptText, preset: preset, bigWordFontSize: bigWordFontSize,
             scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0,
             scriptColorOverride: scriptColorOverride,
             drawsBackground: false,
