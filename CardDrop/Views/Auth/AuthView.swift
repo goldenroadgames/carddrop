@@ -88,6 +88,7 @@ struct AuthView: View {
                 sampleImageNames = files
                     .map(\.name)
                     .filter { !$0.hasPrefix(".") }   // Supabase can create a hidden .emptyFolderPlaceholder entry
+                    .sorted()   // alphabetical, matching the web carousel's bucket ordering (web/app/page.tsx)
             } catch {
                 print("❌ failed to list carousel_postcards: \(error)")
             }
