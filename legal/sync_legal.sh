@@ -5,16 +5,15 @@
 # `supabase storage cp` refuses to overwrite an existing object (409
 # KeyAlreadyExists), so each file is removed first, then re-uploaded.
 #
-# Run this from anywhere — it cd's into the project root (the folder holding
-# supabase/, one level above the CardDrop git repo) itself.
+# Run this from anywhere — it cd's into the repo root itself.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 FILES=(
-  "CardDrop/legal/TERMS_OF_SERVICE.md:terms-of-service.md"
-  "CardDrop/legal/PRIVACY_POLICY.md:privacy-policy.md"
+  "legal/TERMS_OF_SERVICE.md:terms-of-service.md"
+  "legal/PRIVACY_POLICY.md:privacy-policy.md"
 )
 
 for entry in "${FILES[@]}"; do

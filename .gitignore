@@ -12,3 +12,6 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Supabase CLI link metadata
+supabase/.temp/
