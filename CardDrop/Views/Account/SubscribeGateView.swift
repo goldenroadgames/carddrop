@@ -141,7 +141,7 @@ struct SubscribeGateView: View {
             .foregroundColor(.secondary)
             .frame(maxWidth: .infinity)
 
-            Text("We store your name, email, and optional address and phone to auto-fill your cards and deliver physical ones when you choose. Recipient names and addresses you enter are saved to your personal address book so you don't have to re-enter them — we never use recipient information for marketing or share it with anyone. We may feature the design of cards you create in our own marketing; you can opt-out at any time in Settings. You can delete your own info or any saved address at any time, no questions asked.")
+            Text("We store your name, email, and optional address and phone to auto-fill your cards and deliver physical ones when you choose. Recipient names and addresses you enter are saved to your personal address book so you don't have to re-enter them — we never use recipient information for marketing or share it with anyone. We only consider featuring the design of your cards in our own marketing if you choose to allow it, and you can change that at any time in Settings. You can delete your own info or any saved address at any time, no questions asked.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.leading)

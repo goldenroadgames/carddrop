@@ -12,6 +12,297 @@ private struct ImgSizeKey: PreferenceKey {
     static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
 }
 
+// Returns the first SF Symbol name that exists on the running iOS version
+// (UIImage(systemName:) is nil for unknown names); falls back to the last.
+private func firstAvailableSymbol(_ names: String...) -> String {
+    names.first { UIImage(systemName: $0) != nil } ?? names.last!
+}
+
+// The "Done" pill from the Caption edit panel, as one shared style so the
+// panel's Done and the add-sheet's Cancel/Add are literally the same code and
+// can't drift apart.
+private struct DonePillButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            // Fixed point size (not a text style), so it can't scale with
+            // Dynamic Type differently in a sheet vs. the main screen.
+            .font(.system(size: 15, weight: .semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Color.accentColor)
+            .foregroundColor(.white)
+            .cornerRadius(999)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+// A canned font/background color pair for the Caption add sheet. Only the
+// black-font presets get a (black) border; the rest start with none (the user
+// can still turn one on, or set it to Match, in the full panel).
+private struct CaptionColorPreset: Identifiable {
+    let id: Int
+    let font: Color
+    let background: Color
+    let border: Bool
+    var borderUsesFontColor: Bool = false
+
+    // First is the default.
+    static let all: [CaptionColorPreset] = [
+        CaptionColorPreset(id: 0, font: .black,         background: .white,          border: true),
+        CaptionColorPreset(id: 1, font: .black,         background: .standardYellow, border: true),
+        CaptionColorPreset(id: 2, font: .greetingsRed,  background: .white,          border: false),
+        CaptionColorPreset(id: 3, font: .brandBlue,     background: .white,          border: false),
+        CaptionColorPreset(id: 4, font: .white,         background: .black,          border: false),
+        CaptionColorPreset(id: 5, font: .white,         background: .greetingsRed,   border: false),
+        CaptionColorPreset(id: 6, font: .white,         background: .brandBlue,      border: false),
+    ]
+}
+
+// Small sheet shown when Caption is tapped: enter the phrase (may be left
+// blank), pick a container style and a color preset, then Add creates the
+// overlay. The full edit panel is unchanged and opens when the caption is
+// tapped on the card.
+private struct CaptionQuickAddSheet: View {
+    let onAdd: (String, TextBgStyle, CaptionColorPreset) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var style: TextBgStyle = .speech
+    @State private var colors = CaptionColorPreset.all[0]
+    @FocusState private var textFocused: Bool
+    private let charLimit = 40
+    private let styleOrder = TextBgStyle.displayOrder
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Enter Caption")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.brandBlue)
+            // Vertical axis: wraps, and Return inserts a line break. Reserves
+            // exactly 3 rows of height.
+            TextField("Your caption", text: $text, axis: .vertical)
+                .lineLimit(3, reservesSpace: true)
+                .textFieldStyle(.roundedBorder)
+                .focused($textFocused)
+                .onChange(of: text) { _, new in
+                    if new.count > charLimit { text = String(new.prefix(charLimit)) }
+                }
+
+            Text("Style")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.brandBlue)
+            HStack(spacing: 8) {
+                ForEach(styleOrder, id: \.self) { s in
+                    Button(action: { style = s }) {
+                        Image(systemName: s.systemImage)
+                            .font(.system(size: 18))
+                            .accessibilityLabel(s.displayName)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(style == s ? Color.accentColor : Color(.secondarySystemBackground))
+                        .foregroundColor(style == s ? .white : .primary)
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text("Color")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.brandBlue)
+            // Each swatch: the preset's background color as a circle, with an
+            // "A" in its font color.
+            HStack(spacing: 8) {
+                ForEach(CaptionColorPreset.all) { preset in
+                    Button(action: { colors = preset }) {
+                        Text("A")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(preset.font)
+                            .frame(width: 36, height: 36)
+                            .background(preset.background)
+                            .clipShape(Circle())
+                            // The preset's real border (black, or the font color),
+                            // drawn inside the circle so the swatch previews the
+                            // finished look — and a white border stays visible
+                            // against the sheet's white background.
+                            .overlay(Circle().strokeBorder(
+                                preset.borderUsesFontColor ? preset.font : Color.black,
+                                lineWidth: 3)
+                                .opacity(preset.border ? 1 : 0))
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.accentColor, lineWidth: 2.5)
+                                    .padding(-3)
+                                    .opacity(colors.id == preset.id ? 1 : 0)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+
+            Spacer(minLength: 0)   // pushes Cancel/Add to the bottom of the sheet
+
+            HStack {
+                // Same pill as the "Done" button in the full caption panel.
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(DonePillButtonStyle())
+                Spacer()
+                Button("Add") {
+                    onAdd(text, style, colors)
+                    dismiss()
+                }
+                .buttonStyle(DonePillButtonStyle())
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 40)
+        .padding(.top, 20)
+        // CardDropApp pins the whole app to .large, but a sheet doesn't pick that
+        // up, so on a device with larger system text the sheet's text-style fonts
+        // (the Cancel/Add pills) rendered bigger than the same pill in the main UI.
+        .dynamicTypeSize(.large)
+        .onAppear { textFocused = true }
+    }
+}
+
+// Small sheet shown when Greetings is tapped and the card has no badge yet:
+// Intro (top script line, prefilled "greetings from"), Marquee (the big word,
+// prefilled "CardDrop"; if the user clears it, it stays blank — nothing refills
+// it), and Position. Colors/halo/background use defaults; the
+// full panel (tap the badge) has everything else.
+private struct GreetingsQuickAddSheet: View {
+    // Starting values (the parent has already put a badge with these on the
+    // card); `onChange` fires on every edit so the card's badge updates live.
+    let initialIntro: String
+    let initialMarquee: String
+    let initialPosition: GreetingsFixedPosition
+    let initialColor: GreetingsBadgeColor
+    let onChange: (String, String, GreetingsFixedPosition, GreetingsBadgeColor) -> Void
+    let onAdd: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var intro: String
+    @State private var marquee: String
+    @State private var position: GreetingsFixedPosition
+    @State private var badgeColor: GreetingsBadgeColor
+    @FocusState private var focusedField: Field?
+    private enum Field { case intro, marquee }
+    private let introLimit = 25
+    private let marqueeLimit = 20
+    private let labelWidth: CGFloat = 104   // wide enough for "Background" at 17pt semibold
+
+    init(initialIntro: String, initialMarquee: String, initialPosition: GreetingsFixedPosition,
+         initialColor: GreetingsBadgeColor,
+         onChange: @escaping (String, String, GreetingsFixedPosition, GreetingsBadgeColor) -> Void,
+         onAdd: @escaping () -> Void) {
+        self.initialIntro = initialIntro
+        self.initialMarquee = initialMarquee
+        self.initialPosition = initialPosition
+        self.initialColor = initialColor
+        self.onChange = onChange
+        self.onAdd = onAdd
+        _intro = State(initialValue: initialIntro)
+        _marquee = State(initialValue: initialMarquee)
+        _position = State(initialValue: initialPosition)
+        _badgeColor = State(initialValue: initialColor)
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundColor(.brandBlue)
+            .frame(width: labelWidth, alignment: .leading)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+                label("Intro")
+                TextField("greetings from", text: $intro)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .intro)
+                    .onChange(of: intro) { _, new in
+                        if new.count > introLimit { intro = String(new.prefix(introLimit)) }
+                    }
+            }
+
+            HStack(spacing: 8) {
+                label("Marquee")
+                TextField("Mom, Missouri, Buddy…", text: $marquee)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedField, equals: .marquee)
+                    .onChange(of: marquee) { _, new in
+                        if new.count > marqueeLimit { marquee = String(new.prefix(marqueeLimit)) }
+                    }
+            }
+
+            HStack(spacing: 8) {
+                label("Position")
+                // Same segmented control the Write step's phrase filter uses.
+                CompactSegmentedControl(
+                    options: GreetingsFixedPosition.allCases.map { $0.displayName },
+                    selection: Binding(
+                        get: { position.displayName },
+                        set: { name in
+                            if let p = GreetingsFixedPosition.allCases.first(where: { $0.displayName == name }) {
+                                position = p
+                            }
+                        }
+                    )
+                )
+            }
+
+            // Badge background color (no opacity here — that's in the full panel).
+            HStack(spacing: 8) {
+                label("Background")
+                ForEach(GreetingsBadgeColor.allCases) { choice in
+                    Group {
+                        if choice == .transparent {
+                            Image(systemName: "circle.slash")
+                                .font(.system(size: 26))
+                                .foregroundColor(.secondary)
+                                .frame(width: 28, height: 28)
+                        } else {
+                            Circle().fill(choice.color)
+                                .frame(width: 28, height: 28)
+                        }
+                    }
+                    .overlay(
+                        Circle()
+                            .stroke(Color.primary.opacity(badgeColor == choice ? 0.8 : 0.15),
+                                    lineWidth: badgeColor == choice ? 2.5 : 1)
+                    )
+                    .frame(maxWidth: .infinity)
+                    .onTapGesture { badgeColor = choice }
+                }
+            }
+
+            Spacer(minLength: 0)   // pushes Cancel/Add to the bottom of the sheet
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(DonePillButtonStyle())
+                Spacer()
+                Button("Add") {
+                    onAdd()
+                    dismiss()
+                }
+                .buttonStyle(DonePillButtonStyle())
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 40)
+        .padding(.top, 20)
+        .dynamicTypeSize(.large)   // see CaptionQuickAddSheet
+        // (No auto-focus here, unlike the Caption sheet: the keyboard would
+        // cover the card, and the point is to see the default badge on open.)
+        // Live: push every edit to the badge already sitting on the card.
+        .onChange(of: intro)      { _, _ in onChange(intro, marquee, position, badgeColor) }
+        .onChange(of: marquee)    { _, _ in onChange(intro, marquee, position, badgeColor) }
+        .onChange(of: position)   { _, _ in onChange(intro, marquee, position, badgeColor) }
+        .onChange(of: badgeColor) { _, _ in onChange(intro, marquee, position, badgeColor) }
+    }
+}
+
 struct TextOverlayStepView: View {
     @ObservedObject var draft: PostcardDraft
     var onNext: () -> Void
@@ -28,6 +319,23 @@ struct TextOverlayStepView: View {
     @State private var lastImgSize: CGSize = .zero
     @State private var keyboardHeight: CGFloat = 0
     @State private var isGeneratingSubjectCutout = false
+    // Heights of the two quick-add sheets (their .presentationDetents).
+    private static let captionSheetHeight: CGFloat = 390
+    private static let greetingsSheetHeight: CGFloat = 325
+    @State private var showingCaptionSheet = false
+    @State private var showingGreetingsSheet = false
+    // Live-preview state for the Greetings quick-add sheet: a real badge is put
+    // on the card when the sheet opens and edited as the user types. If the
+    // sheet closes without Add, it's removed and the photo/cutout put back.
+    @State private var pendingGreetingsImgSize: CGSize = .zero
+    @State private var greetingsPreviewID: UUID?
+    @State private var greetingsAddConfirmed = false
+    @State private var greetingsRestoreScale: CGFloat = 1
+    @State private var greetingsRestoreOffset: CGSize = .zero
+    @State private var greetingsStartedCutout = false
+    // Canvas width captured when the Caption button is tapped, since the sheet's
+    // onAdd closure runs after the button row's imgSize is out of scope.
+    @State private var pendingCaptionCanvasWidth: CGFloat = 0
 
     private var isEditing: Bool {
         selectedIndex != nil || selectedQRIndex != nil || selectedBurstIndex != nil || selectedGreetingsIndex != nil
@@ -115,6 +423,8 @@ struct TextOverlayStepView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isEditing)
+        .animation(.easeInOut(duration: 0.2), value: showingCaptionSheet)
+        .animation(.easeInOut(duration: 0.2), value: showingGreetingsSheet)
         .animation(.easeOut(duration: 0.25), value: keyboardHeight)
         .onAppear {
             updateCachedFilteredImage()
@@ -142,7 +452,7 @@ struct TextOverlayStepView: View {
             // re-reading (stale) draft.image.
             updateCachedFilteredImage(newImage)
         }
-        // Without this, the keyboard opening (e.g. typing in the Add Text
+        // Without this, the keyboard opening (e.g. typing in the Caption
         // panel) shrinks the whole step's available height by the
         // keyboard's height, on top of the fixed 240pt reserve
         // `postcardFrameSize` already subtracts — easily driving maxHeight
@@ -164,16 +474,27 @@ struct TextOverlayStepView: View {
         }
     }
 
+    // True while anything is open over the bottom of the screen: the edit panel
+    // (caption / Greetings / QR / burst) or one of the quick-add sheets.
+    private var isCoveringControlsOpen: Bool {
+        isEditing || showingCaptionSheet || showingGreetingsSheet
+    }
+
     @ViewBuilder
     private func mainContent(isEditing: Bool, frameSize: CGSize, imgSize: CGSize) -> some View {
+            // The card group below sits in the vertical center of this section
+            // (a Spacer above and below it). While any control/dialog is open
+            // the top Spacer is dropped, so the group moves to the TOP of the
+            // section — out from under the panel/sheet/keyboard — and returns
+            // to the center when it closes (the step's .animation modifiers
+            // animate the move).
             VStack(spacing: 0) {
-                Spacer(minLength: 0)
+                if !isCoveringControlsOpen {
+                    Spacer(minLength: 0)
+                }
 
                 // Pinch hint stays anchored directly above the canvas (with
-                // its existing padding) — this whole group is what gets
-                // vertically centered in the safe zone via the two Spacers
-                // around it, rather than the group sitting top-anchored with
-                // leftover space only pushed to the bottom.
+                // its existing padding).
                 VStack(spacing: 0) {
                 HStack(spacing: 6) {
                     Text("Pinch to zoom · Drag to reposition")
@@ -189,7 +510,10 @@ struct TextOverlayStepView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.top, 8)
+                // Pulled up into the empty lower part of the navigation bar
+                // (the inline title only fills its middle) to tighten the gap
+                // under "Style It".
+                .padding(.top, -15)
 
                 // Canvas
                 ZStack {
@@ -496,21 +820,53 @@ struct TextOverlayStepView: View {
     private func addOverlayButtonsRow(imgSize: CGSize) -> some View {
         VStack(spacing: 4) {
             HStack(spacing: 8) {
-                Button(action: { addTextOverlay(canvasWidth: imgSize.width) }) {
-                    Label("Add Text", systemImage: "plus.circle")
+                Button(action: {
+                    pendingCaptionCanvasWidth = imgSize.width
+                    showingCaptionSheet = true
+                }) {
+                    Label("Caption", systemImage: firstAvailableSymbol("text.bubble.badge.sparkles", "ellipsis.message"))
                         .font(.system(size: 17, weight: .regular))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)
                         .foregroundColor(.primary)
                         .themedSurface(appSettings.uiTheme, cornerRadius: 999)
                 }
-                Button(action: { addGreetingsOverlay(imgSize: imgSize) }) {
-                    Label("Greetings", systemImage: "text.badge.star")
+                .sheet(isPresented: $showingCaptionSheet) {
+                    CaptionQuickAddSheet { text, style, colors in
+                        addTextOverlay(canvasWidth: pendingCaptionCanvasWidth, text: text, style: style, colors: colors)
+                    }
+                    .presentationDetents([.height(Self.captionSheetHeight)])
+                }
+                Button(action: {
+                    if draft.greetingsOverlays.isEmpty {
+                        startGreetingsPreview(imgSize: imgSize)
+                    } else {
+                        // Only one badge per card — edit the existing one.
+                        addGreetingsOverlay(imgSize: imgSize)
+                    }
+                }) {
+                    Label("Greetings", systemImage: firstAvailableSymbol("rectangle.badge.sparkles", "text.rectangle"))
                         .font(.system(size: 17, weight: .regular))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)
                         .foregroundColor(.primary)
                         .themedSurface(appSettings.uiTheme, cornerRadius: 999)
+                }
+                .sheet(isPresented: $showingGreetingsSheet, onDismiss: finishGreetingsPreview) {
+                    GreetingsQuickAddSheet(
+                        initialIntro: Self.greetingsDefaultIntro,
+                        initialMarquee: Self.greetingsDefaultMarquee,
+                        initialPosition: .left,
+                        initialColor: .blue,
+                        onChange: { intro, marquee, position, color in
+                            updateGreetingsPreview(intro: intro, marquee: marquee, position: position, color: color)
+                        },
+                        onAdd: { greetingsAddConfirmed = true }
+                    )
+                    .presentationDetents([.height(Self.greetingsSheetHeight)])
+                    // The card stays visible and tappable behind the short sheet,
+                    // so the live badge can be watched while typing.
+                    .presentationBackgroundInteraction(.enabled)
                 }
                 // Burst feature hidden — code intact, re-enable by restoring this button
                 // Button(action: { addBurstOverlay(canvasHeight: imgSize.height) }) {
@@ -611,7 +967,9 @@ struct TextOverlayStepView: View {
             let filteredCutout = rawCutout.map { filter.apply(to: $0) }
             DispatchQueue.main.async {
                 isGeneratingSubjectCutout = false
-                guard let filteredCutout else { return }
+                // No banner (e.g. the quick-add sheet was cancelled while this
+                // was still running) → nothing for the cutout to sit above.
+                guard let filteredCutout, !draft.greetingsOverlays.isEmpty else { return }
                 draft.subjectCutoutImage = filteredCutout
                 rerenderSubjectCutoutComposedImage()
             }
@@ -705,7 +1063,6 @@ struct TextOverlayStepView: View {
                     get: { draft.greetingsOverlays.indices.contains(idx) ? draft.greetingsOverlays[idx] : GreetingsOverlay() },
                     set: { if draft.greetingsOverlays.indices.contains(idx) { draft.greetingsOverlays[idx] = $0 } }
                 ),
-                canvasBackgroundColor: $draft.canvasBackgroundColor,
                 photoMirrorEnabled: $draft.photoMirrorEnabled,
                 isSubjectCutoutActive: draft.subjectCutoutImage != nil,
                 isGeneratingSubjectCutout: isGeneratingSubjectCutout,
@@ -716,15 +1073,27 @@ struct TextOverlayStepView: View {
         }
     }
 
-    private func addTextOverlay(canvasWidth: CGFloat) {
+    private func addTextOverlay(canvasWidth: CGFloat, text: String, style: TextBgStyle, colors: CaptionColorPreset) {
         let width = canvasWidth > 0
             ? canvasWidth
             : imageAreaSize(in: postcardFrameSize(availableSize: UIScreen.main.bounds.size)).width
-        draft.textOverlays.append(TextOverlay(at: CGPoint(x: 0.5, y: 0.2), canvasWidth: width))
-        selectedIndex = draft.textOverlays.count - 1
-        selectedQRIndex = nil
-        selectedBurstIndex = nil
-        selectedGreetingsIndex = nil
+        var overlay = TextOverlay(at: CGPoint(x: 0.5, y: 0.2), canvasWidth: width)
+        overlay.text = text
+        overlay.bgStyle = style
+        overlay.textColor = colors.font
+        overlay.bgColor = colors.background
+        overlay.borderEnabled = colors.border
+        overlay.borderUsesFontColor = colors.borderUsesFontColor
+
+        // Fit the width to the entered phrase; stays auto-fit (re-fitting as the
+        // text is edited) until the user drags the Width slider. Blank text
+        // keeps the default width until something is typed.
+        overlay.widthAutoFit = true
+        overlay.autoFitWidth()
+
+        // Placed on the card without opening the full edit panel — tapping the
+        // caption on the card does that.
+        draft.textOverlays.append(overlay)
     }
 
     private func addBurstOverlay(canvasHeight: CGFloat) {
@@ -737,6 +1106,9 @@ struct TextOverlayStepView: View {
 
     // Only one Greetings badge is allowed per card — if one already exists,
     // tapping the control edits it instead of creating a second.
+    // Existing badge: just selects it (opens the full panel). (A card has at
+    // most one badge; a NEW one is created through the quick-add sheet — see
+    // startGreetingsPreview.)
     private func addGreetingsOverlay(imgSize: CGSize) {
         if draft.greetingsOverlays.isEmpty {
             var overlay = GreetingsOverlay()
@@ -751,6 +1123,74 @@ struct TextOverlayStepView: View {
         selectedIndex = nil
         selectedQRIndex = nil
         selectedBurstIndex = nil
+    }
+
+    // MARK: Greetings quick-add (live on the card)
+
+    private static let greetingsDefaultIntro = "greetings from"
+    private static let greetingsDefaultMarquee = "CardDrop"
+
+    // Greetings tapped with no badge yet: put the DEFAULT badge on the card
+    // right away (yellow script, blue band, halo on, Tilt, "greetings from" /
+    // "CardDrop"), start "Put subject in front", then open the sheet — which
+    // edits that badge live. The photo's scale/offset are remembered so a
+    // cancel can put them back (adding the badge may re-clamp the photo).
+    private func startGreetingsPreview(imgSize: CGSize) {
+        pendingGreetingsImgSize = imgSize
+        greetingsAddConfirmed = false
+        greetingsRestoreScale = draft.imageScale
+        greetingsRestoreOffset = draft.imageOffset
+
+        var overlay = GreetingsOverlay()
+        overlay.word = Self.greetingsDefaultMarquee
+        overlay.scriptText = Self.greetingsDefaultIntro
+        overlay.fixedPosition = .left
+        overlay.scriptColorChoice = .yellow
+        overlay.badgeColorChoice = .blue
+        overlay.haloEnabled = true
+        greetingsPreviewID = overlay.id
+        draft.greetingsOverlays.append(overlay)
+        clampPhotoToSafeZone(imgSize: imgSize)
+        rerenderComposedImage()
+
+        greetingsStartedCutout = false
+        if draft.subjectCutoutImage == nil && draft.image != nil {
+            greetingsStartedCutout = true
+            toggleSubjectCutout()
+        }
+        showingGreetingsSheet = true
+    }
+
+    // Each edit in the sheet updates the badge on the card.
+    private func updateGreetingsPreview(intro: String, marquee: String, position: GreetingsFixedPosition, color: GreetingsBadgeColor) {
+        guard let id = greetingsPreviewID,
+              let i = draft.greetingsOverlays.firstIndex(where: { $0.id == id }) else { return }
+        draft.greetingsOverlays[i].scriptText = intro
+        draft.greetingsOverlays[i].word = marquee
+        draft.greetingsOverlays[i].fixedPosition = position
+        draft.greetingsOverlays[i].badgeColorChoice = color
+    }
+
+    // Runs whenever the sheet closes. Add → keep the badge (re-clamp the photo
+    // for its final text/position, panel stays closed). Cancel or swipe-down →
+    // remove the badge and put the photo and cutout back as they were.
+    private func finishGreetingsPreview() {
+        defer { greetingsPreviewID = nil }
+        guard let id = greetingsPreviewID else { return }
+        if greetingsAddConfirmed {
+            clampPhotoToSafeZone(imgSize: pendingGreetingsImgSize)
+            rerenderComposedImage()
+            if draft.subjectCutoutImage != nil { rerenderSubjectCutoutComposedImage() }
+        } else {
+            draft.greetingsOverlays.removeAll { $0.id == id }
+            draft.imageScale = greetingsRestoreScale
+            draft.imageOffset = greetingsRestoreOffset
+            if greetingsStartedCutout {
+                draft.subjectCutoutImage = nil
+                draft.subjectCutoutComposedImage = nil
+            }
+            rerenderComposedImage()
+        }
     }
 
     private func addQROverlay() {
@@ -872,7 +1312,7 @@ struct TextOverlayItemView: View {
     // point) stayed inside.
     private var containerSize: CGSize {
         let boxWidth = overlay.normalizedWidth * printCanvasSize.width
-        let scaledFontSize = min(overlay.fontSize, 36) * fontScale
+        let scaledFontSize = min(overlay.fontSize, 48) * fontScale
         let uiFont = UIFont(name: overlay.resolvedFontName, size: scaledFontSize)
             ?? UIFont.systemFont(ofSize: scaledFontSize)
 
@@ -880,16 +1320,11 @@ struct TextOverlayItemView: View {
         let basePadV: CGFloat
         switch overlay.bgStyle {
         case .thought:      basePadH = 2 * fontScale;  basePadV = 2 * fontScale
-        case .box, .speech: basePadH = 12 * fontScale; basePadV = 12 * fontScale
+        case .box, .speech, .rectangle: basePadH = 12 * fontScale; basePadV = 12 * fontScale
         case .none:         basePadH = 5 * fontScale;  basePadV = 4 * fontScale
         }
         let cloudExtra: CGFloat = (overlay.bgStyle == .thought ? 2 : 0) * fontScale
-        let tailHeight: CGFloat
-        switch overlay.bgStyle {
-        case .speech:  tailHeight = SpeechBubbleShape.tailHeight(scale: fontScale)
-        case .thought: tailHeight = ThoughtBubbleShape.tailHeight(scale: fontScale)
-        default:       tailHeight = 0
-        }
+        let tailHeight = overlay.tailReserve(boxWidth: boxWidth, scale: fontScale)
 
         let displayText = overlay.text.isEmpty ? " " : overlay.text
         let bounding = (displayText as NSString).boundingRect(
@@ -899,9 +1334,11 @@ struct TextOverlayItemView: View {
             context: nil
         )
 
+        // Mirrors TextOverlayBubbleView's proportional oval/cloud padding.
+        let extra = overlay.bubbleExtraPadding(boxWidth: boxWidth, scale: fontScale)
         return CGSize(
-            width:  boxWidth + 2 * (basePadH + cloudExtra),
-            height: ceil(bounding.height) + 2 * (basePadV + cloudExtra) + tailHeight
+            width:  boxWidth + 2 * (basePadH + cloudExtra + extra.width),
+            height: ceil(bounding.height) + 2 * (basePadV + cloudExtra + extra.height) + tailHeight
         )
     }
 
@@ -1023,6 +1460,7 @@ struct TextOverlayEditPanel: View {
                     .onKeyPress(.tab) { .handled }
                     .onChange(of: overlay.text) { _, new in
                         if new.count > charLimit { overlay.text = String(new.prefix(charLimit)) }
+                        if overlay.widthAutoFit { overlay.autoFitWidth() }
                     }
             }
             .padding(4)
@@ -1053,15 +1491,16 @@ struct TextOverlayEditPanel: View {
                 .padding(.horizontal, 2)
             }
 
-            // Row 3: Size slider + text color
+            // Row 3: text color, Size slider, Bold, Italic
             HStack(spacing: 10) {
+                ColorPicker("", selection: $overlay.textColor).labelsHidden()
                 Text("Size").font(.caption).foregroundColor(.secondary)
                 Slider(
                     value: Binding(
                         get: { Double(overlay.fontSize) },
                         set: { overlay.fontSize = CGFloat($0) }
                     ),
-                    in: 12...36, step: 1
+                    in: 16...48, step: 1
                 )
                 Text("\(Int(overlay.fontSize))")
                     .font(.caption).foregroundColor(.secondary).frame(width: 26)
@@ -1081,41 +1520,61 @@ struct TextOverlayEditPanel: View {
                         .foregroundColor(overlay.isItalic ? .white : .primary)
                         .cornerRadius(999)
                 }
-                ColorPicker("", selection: $overlay.textColor).labelsHidden()
             }
 
-            // Row: Halo — a colored ring behind the text glyphs themselves
-            // (independent of the bgStyle shape's own border, below).
-            // Transparent (off) is the default and first/leftmost swatch.
+            // Row: Border (with a container) or Halo (Float only) — never both.
+            // The halo is a plain on/off; its color is automatic (see
+            // TextOverlay.haloColor).
             HStack(spacing: 8) {
-                Text("Halo").font(.caption).foregroundColor(.secondary)
-                HStack(spacing: 6) {
-                    ForEach(TextHaloColor.allCases) { choice in
-                        Group {
-                            if choice == .transparent {
-                                Image(systemName: "circle.slash")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 24, height: 24)
-                            } else {
-                                Circle().fill(choice.color)
-                                    .frame(width: 24, height: 24)
+                if overlay.bgStyle != .none {
+                    // Segmented control (same one as the Write step's phrase
+                    // filter): Black / Off / Match (border matches the font
+                    // color) — maps onto borderEnabled + borderUsesFontColor.
+                    Text("Border").font(.caption).foregroundColor(.secondary)
+                    CompactSegmentedControl(
+                        options: ["Black", "Off", "Match"],
+                        selection: Binding(
+                            get: {
+                                !overlay.borderEnabled ? "Off"
+                                    : (overlay.borderUsesFontColor ? "Match" : "Black")
+                            },
+                            set: { choice in
+                                switch choice {
+                                case "Off":
+                                    overlay.borderEnabled = false
+                                case "Match":
+                                    overlay.borderEnabled = true
+                                    overlay.borderUsesFontColor = true
+                                default:
+                                    overlay.borderEnabled = true
+                                    overlay.borderUsesFontColor = false
+                                }
                             }
-                        }
-                        .overlay(
-                            Circle()
-                                .stroke(Color.primary.opacity(overlay.haloColorChoice == choice ? 0.8 : 0.15),
-                                        lineWidth: overlay.haloColorChoice == choice ? 2.5 : 1)
                         )
-                        .onTapGesture { overlay.haloColorChoice = choice }
-                    }
+                    )
+                } else {
+                    Button("Halo") { overlay.haloEnabled.toggle() }
+                        .font(.system(size: 13, weight: .medium))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 16)
+                        .frame(height: 30)
+                        .background(overlay.haloEnabled ? Color.accentColor : Color(.secondarySystemBackground))
+                        .foregroundColor(overlay.haloEnabled ? .white : .primary)
+                        .cornerRadius(999)
                 }
             }
 
             // Row 4: BG controls, color, mirror — all in one scrollable strip
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(TextBgStyle.allCases, id: \.self) { style in
+                    // Background color first, before the container icons. Kept in
+                    // the layout (just invisible) for Float so the icons don't
+                    // shift sideways when switching to/from it.
+                    ColorPicker("", selection: $overlay.bgColor).labelsHidden()
+                        .opacity(overlay.bgStyle == .none ? 0 : 1)
+                        .allowsHitTesting(overlay.bgStyle != .none)
+
+                    ForEach(TextBgStyle.displayOrder, id: \.self) { style in
                         Button(action: { overlay.bgStyle = style }) {
                             Image(systemName: style.systemImage)
                                 .font(.system(size: 15))
@@ -1156,26 +1615,8 @@ struct TextOverlayEditPanel: View {
                         }
                     }
 
-                    // Border, then Color — the last two controls on this
-                    // line, color last. Matches Row 3's own pattern (Size,
-                    // Bold, Italic, then color last) so color consistently
-                    // anchors as the final control on every row in this
-                    // panel. Color moved here (after the shape icons AND
-                    // any tail controls) rather than sitting right after
-                    // the icons, since it was easy to miss/lose track of
-                    // wedged between the icons and the more visually
-                    // distinct tail-direction arrows.
-                    if overlay.bgStyle != .none {
-                        Button("Border") { overlay.borderEnabled.toggle() }
-                            .font(.system(size: 13, weight: .medium))
-                            .fixedSize(horizontal: true, vertical: false)
-                            .padding(.horizontal, 16)
-                            .frame(height: 30)
-                            .background(overlay.borderEnabled ? Color.accentColor : Color(.secondarySystemBackground))
-                            .foregroundColor(overlay.borderEnabled ? .white : .primary)
-                            .cornerRadius(999)
-                        ColorPicker("", selection: $overlay.bgColor).labelsHidden()
-                    }
+                    // (Background color now leads this strip, and the Border
+                    // toggle lives on the Halo row.)
                 }
                 .padding(.horizontal, 2)
             }
@@ -1187,7 +1628,10 @@ struct TextOverlayEditPanel: View {
                 Slider(
                     value: Binding(
                         get: { Double(overlay.normalizedWidth) },
-                        set: { overlay.normalizedWidth = CGFloat($0) }
+                        set: {
+                            overlay.normalizedWidth = CGFloat($0)
+                            overlay.widthAutoFit = false   // user chose a width — stop auto-fitting
+                        }
                     ),
                     in: widthRange
                 )
@@ -1204,12 +1648,7 @@ struct TextOverlayEditPanel: View {
             // Row 5: Done, Delete — last.
             HStack(spacing: 8) {
                 Button("Done", action: onDone)
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Color.accentColor)
-                    .foregroundColor(.white)
-                    .cornerRadius(999)
+                    .buttonStyle(DonePillButtonStyle())
 
                 Button(action: onDelete) {
                     Image(systemName: "trash").foregroundColor(.red)
@@ -1221,6 +1660,12 @@ struct TextOverlayEditPanel: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
         .background(Color(.systemBackground))
+        // Anything that changes the text's rendered width re-fits it, unless
+        // the user has set the width by hand (widthAutoFit cleared).
+        .onChange(of: overlay.fontName) { _, _ in if overlay.widthAutoFit { overlay.autoFitWidth() } }
+        .onChange(of: overlay.fontSize) { _, _ in if overlay.widthAutoFit { overlay.autoFitWidth() } }
+        .onChange(of: overlay.isBold)   { _, _ in if overlay.widthAutoFit { overlay.autoFitWidth() } }
+        .onChange(of: overlay.isItalic) { _, _ in if overlay.widthAutoFit { overlay.autoFitWidth() } }
     }
 }
 

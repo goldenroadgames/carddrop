@@ -280,7 +280,7 @@ struct CreateFlowView: View {
 
     var stepTitle: String {
         switch currentStep {
-        case 0: return "Choose Photo"
+        case 0: return "Photo"
         case 1: return "Style It"
         case 2: return "Write Card"
         case 3: return "Invisible Ink"

@@ -68,6 +68,22 @@ struct SampleCardCarousel: View {
     // its image loads and sizes itself to its own native aspect ratio.
     @State private var measuredWidths: [String: CGFloat] = [:]
 
+    // MUST be @State, not a plain computed property over stockImageNames/
+    // imageNames — runPileLoop() runs inside a long-lived `.task`, whose
+    // closure captures `self` (a value-type struct) ONCE, as a frozen
+    // snapshot, at whatever moment the task first starts (typically before
+    // the async Supabase bucket fetch has finished). A plain computed
+    // property read via that captured `self` would keep reflecting THAT
+    // stale snapshot's `imageNames` forever, no matter how many bucket
+    // photos arrive afterward — so `sources.count` inside the loop would
+    // stay stuck at the small initial (stock-only) count, and `currentIndex`
+    // would never advance far enough to reach the rest of the bucket. @State
+    // storage lives OUTSIDE the struct, in a box tied to the view's
+    // identity, so it stays live and correct even when read through an old
+    // captured `self` — updated explicitly via updateSources() below
+    // whenever the props actually change.
+    @State private var sources: [CardImageSource] = []
+
     // Used for sizing the pile's own frame only (not any individual card's
     // frame) — the midpoint between a typical portrait and landscape card's
     // width.
@@ -75,11 +91,8 @@ struct SampleCardCarousel: View {
         cardHeight * (portraitAspectRatio + landscapeAspectRatio) / 2
     }
 
-    // Stock images first, bucket images appended once loaded — stock alone
-    // is always enough to fill the pile, so there's never an empty/
-    // placeholder-only moment while the bucket fetch is in flight.
-    private var sources: [CardImageSource] {
-        stockImageNames.map { .stock($0) } + imageNames.map { .remote($0) }
+    private func updateSources() {
+        sources = stockImageNames.map { .stock($0) } + imageNames.map { .remote($0) }
     }
 
     private var nextIndex: Int {
@@ -112,6 +125,9 @@ struct SampleCardCarousel: View {
         // same "ghost edge" bug as the old ring carousel's aspect-ratio
         // mismatch, just a different cause. Always keep this.
         .clipped()
+        .onAppear { updateSources() }
+        .onChange(of: stockImageNames) { _, _ in updateSources() }
+        .onChange(of: imageNames) { _, _ in updateSources() }
         .task { await runPileLoop() }
     }
 
@@ -204,8 +220,13 @@ struct SampleCardCarousel: View {
         // that modifier's own comment). Height scales down proportionally
         // to preserve aspect ratio when the cap kicks in, same technique as
         // the web ring carousel's earlier "ghost edge" fix.
+        // The extra 0.9 factor gives landscape cards (the ones that
+        // actually hit this cap) a bit of breathing room inside the frame
+        // rather than sizing them exactly to referenceWidth with zero
+        // margin before rotation/offset — without it they read as crowded
+        // and can graze/clip against the frame's own `.clipped()` edge.
         let measuredWidth = measuredWidths[key] ?? referenceWidth
-        let cap = min(maxCardWidth, referenceWidth)
+        let cap = min(maxCardWidth, referenceWidth) * 0.9
         let width = min(measuredWidth, cap)
         let height = measuredWidth > cap ? cardHeight * (cap / measuredWidth) : cardHeight
 
@@ -228,45 +249,68 @@ struct SampleCardCarousel: View {
                 .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
 
         case .remote(let name):
-            AsyncImage(url: imageURL(for: name)) { phase in
-                switch phase {
-                case .success(let image):
-                    // Identical chain to the .stock branch above — same
-                    // modifiers, same order, applied directly to the image
-                    // itself (not to AsyncImage as a wrapping container),
-                    // so a bucket photo is sized exactly the same way a
-                    // bundled one is, no divergent layout behavior between
-                    // the two sources.
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: cardHeight)
-                        .background(
-                            GeometryReader { g in
-                                Color.clear.onAppear { measuredWidths[key] = g.size.width }
-                            }
-                        )
-                        .frame(width: width, height: height)
-                        .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                default:
-                    // Covers both the loading and failure cases — keeps the
-                    // pile visually complete instead of rendering a blank
-                    // gap (the stock images already guarantee the pile isn't
-                    // empty, this just covers a slow/failed bucket fetch for
-                    // this particular slot).
-                    RoundedRectangle(cornerRadius: cardCornerRadius)
-                        .fill(Color.gray.opacity(0.15))
-                        .frame(width: width, height: height)
-                        .overlay(
-                            Image(systemName: "photo")
-                                .font(.system(size: 28))
-                                .foregroundColor(.gray.opacity(0.5))
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
-                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
-                }
+            // A manual cache keyed by filename, shared across BOTH the front
+            // and back slots — NOT AsyncImage. AsyncImage's load state is
+            // tied to its own view instance; forcing a fresh instance
+            // whenever `name` changes (needed so a genuinely new photo
+            // actually fetches, rather than forever showing whichever one
+            // loaded first) also means a photo that was JUST fully loaded a
+            // moment ago in the OTHER slot resets to the empty/loading
+            // placeholder the instant it becomes this slot's turn — a
+            // visible flash right after every swap. A shared `loadedImages`
+            // dictionary has no such per-instance reset: once any slot loads
+            // a given name, every future appearance of that name (either
+            // slot, any cycle) renders it immediately, no placeholder.
+            if let image = loadedImages[name] {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: cardHeight)
+                    .background(
+                        GeometryReader { g in
+                            Color.clear.onAppear { measuredWidths[key] = g.size.width }
+                        }
+                    )
+                    .frame(width: width, height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+            } else {
+                // Covers both the loading and failure cases — keeps the
+                // pile visually complete instead of rendering a blank gap
+                // (the stock images already guarantee the pile isn't empty,
+                // this just covers a slow/failed bucket fetch for this
+                // particular slot). Kicks off the load itself on first
+                // appearance — by the time this slot is actually exposed
+                // (revealed as "back" well before its own crossfade), it's
+                // had the full rest duration to finish.
+                RoundedRectangle(cornerRadius: cardCornerRadius)
+                    .fill(Color.gray.opacity(0.15))
+                    .frame(width: width, height: height)
+                    .overlay(
+                        Image(systemName: "photo")
+                            .font(.system(size: 28))
+                            .foregroundColor(.gray.opacity(0.5))
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius))
+                    .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                    .onAppear { loadImageIfNeeded(name) }
             }
+        }
+    }
+
+    // Shared across both slots — see the comment in cardView's `.remote`
+    // case for why this replaces AsyncImage entirely.
+    @State private var loadedImages: [String: UIImage] = [:]
+    @State private var loadingNames: Set<String> = []
+
+    private func loadImageIfNeeded(_ name: String) {
+        guard loadedImages[name] == nil, !loadingNames.contains(name) else { return }
+        loadingNames.insert(name)
+        Task {
+            defer { loadingNames.remove(name) }
+            guard let (data, _) = try? await URLSession.shared.data(from: imageURL(for: name)),
+                  let image = UIImage(data: data) else { return }
+            loadedImages[name] = image
         }
     }
 }

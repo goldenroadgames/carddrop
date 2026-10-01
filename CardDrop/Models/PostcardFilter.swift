@@ -16,6 +16,13 @@ enum PostcardFilter: String, CaseIterable {
     case roy = "Roy"
     case newsprint = "Newsprint"
 
+    // Cases offered on the Choose Photo picker. Roy/Halftone/Newsprint are
+    // removed from the picker but kept as cases so existing drafts/sent
+    // cards that already used them still decode and render correctly.
+    static var pickerCases: [PostcardFilter] {
+        allCases.filter { $0 != .comic && $0 != .roy && $0 != .newsprint }
+    }
+
     func apply(to image: UIImage) -> UIImage {
         guard self != .none,
               let ciImage = CIImage(image: image) else { return image }

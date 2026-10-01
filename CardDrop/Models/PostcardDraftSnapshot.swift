@@ -45,7 +45,10 @@ struct TextOverlaySnapshot: Codable {
     var isBold:   Bool
     var isItalic: Bool
     var borderEnabled: Bool?       // Optional for backward-compatible decode
-    var haloColorRaw: String?      // Optional for backward-compatible decode
+    var haloColorRaw: String?      // Legacy (old halo swatch); decoded only, no longer written
+    var haloEnabled: Bool?         // Optional for backward-compatible decode
+    var borderUsesFontColor: Bool? // Optional for backward-compatible decode
+    var widthAutoFit: Bool?        // Optional for backward-compatible decode
 
     init(_ overlay: TextOverlay) {
         id            = overlay.id
@@ -63,7 +66,9 @@ struct TextOverlaySnapshot: Codable {
         isBold        = overlay.isBold
         isItalic      = overlay.isItalic
         borderEnabled = overlay.borderEnabled
-        haloColorRaw  = overlay.haloColorChoice.rawValue
+        haloEnabled   = overlay.haloEnabled
+        borderUsesFontColor = overlay.borderUsesFontColor
+        widthAutoFit  = overlay.widthAutoFit
 
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         UIColor(overlay.textColor).getRed(&r, green: &g, blue: &b, alpha: &a)
@@ -89,7 +94,11 @@ struct TextOverlaySnapshot: Codable {
         o.isBold           = isBold
         o.isItalic         = isItalic
         o.borderEnabled    = borderEnabled ?? true
-        o.haloColorChoice  = haloColorRaw.flatMap { TextHaloColor(rawValue: $0) } ?? .transparent
+        o.borderUsesFontColor = borderUsesFontColor ?? false
+        // Older drafts stored a halo swatch instead: any real color -> on,
+        // none/transparent/absent -> off.
+        o.haloEnabled      = haloEnabled ?? (haloColorRaw.map { $0 != "transparent" } ?? false)
+        o.widthAutoFit     = widthAutoFit ?? false
         return o
     }
 }

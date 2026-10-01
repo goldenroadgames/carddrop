@@ -6,6 +6,30 @@ import UniformTypeIdentifiers
 private let minPrintPixels: CGFloat = 1800  // long side
 private let minPrintPixelsShort: CGFloat = 1200  // short side
 
+private extension View {
+    // .shadow()'s blur always scales with radius — there's no hard-edge
+    // option there. For a crisp outline instead, stack radius-0 shadows
+    // offset in rings of 8 directions: dense near the letters fills the
+    // counters of open letters (e, o, p, s...) solid black; the outer
+    // ring sets the halo's thickness.
+    func blackHalo() -> some View {
+        self
+            .foregroundColor(Color(red: 1.0, green: 0.886, blue: 0.118))
+            .shadow(color: .black, radius: 0, x: 0.35, y: 0.35)
+            .shadow(color: .black, radius: 0, x: -0.35, y: 0.35)
+            .shadow(color: .black, radius: 0, x: 0.35, y: -0.35)
+            .shadow(color: .black, radius: 0, x: -0.35, y: -0.35)
+            .shadow(color: .black, radius: 0, x: 0.85, y: 0)
+            .shadow(color: .black, radius: 0, x: -0.85, y: 0)
+            .shadow(color: .black, radius: 0, x: 0, y: 0.85)
+            .shadow(color: .black, radius: 0, x: 0, y: -0.85)
+            .shadow(color: .black, radius: 0, x: 0.6, y: 0.6)
+            .shadow(color: .black, radius: 0, x: -0.6, y: 0.6)
+            .shadow(color: .black, radius: 0, x: 0.6, y: -0.6)
+            .shadow(color: .black, radius: 0, x: -0.6, y: -0.6)
+    }
+}
+
 // MARK: - Step 0: Choose Photo
 //
 // Split back out from Style It (which had absorbed this, orientation/border,
@@ -20,6 +44,7 @@ struct ChoosePhotoStepView: View {
     @ObservedObject var draft: PostcardDraft
     var onNext: () -> Void
 
+    @State private var showGetInspired = false
     @State private var isPickerPresented = false
     @State private var isCameraPresented = false
     @State private var isFileImporterPresented = false
@@ -82,7 +107,7 @@ struct ChoosePhotoStepView: View {
                 // Landscape/Portrait toggle.
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        ForEach(PostcardFilter.allCases, id: \.self) { filter in
+                        ForEach(PostcardFilter.pickerCases, id: \.self) { filter in
                             ZStack {
                                 Color.clear.frame(width: 64, height: 64)
                                 if let thumb = filterThumbnails[filter] {
@@ -196,6 +221,9 @@ struct ChoosePhotoStepView: View {
             .presentationDetents([.fraction(0.78)])
             .presentationBackgroundInteraction(.enabled)
             .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showGetInspired) {
+            InspireGalleryView()
         }
         .alert("Photo May Print Blurry", isPresented: $showLowResAlert) {
             Button("Use Anyway") {
@@ -474,7 +502,7 @@ struct ChoosePhotoStepView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "camera.fill")
-                    Text("Take a Photo")
+                    Text("Take a Picture")
                 }
                 .font(.system(size: 17, weight: .semibold))
                 .frame(maxWidth: .infinity)
@@ -524,6 +552,44 @@ struct ChoosePhotoStepView: View {
         }
         .padding(.horizontal)
         .padding(.top, 41)
+        // Sits in the existing 41pt top padding above — an overlay, so it
+        // can't push Take a Photo/Import a File/Choose Photo down at all.
+        // Sole entry point for the "Get Inspired" gallery — deliberately
+        // here rather than on the Postcards tab (felt jammed there,
+        // competing with Sent/Drafts) since "stuck for ideas before
+        // picking a photo" is exactly when inspiration is most useful.
+        // Gold rather than red/blue — distinct from the blue action pills
+        // below without being alarming, and already part of the app's
+        // palette (see GreetingsOverlay's greetingsGold).
+        .overlay(alignment: .top) {
+            Button {
+                // Mirrors the Take a Picture/Import a File buttons above:
+                // the library picker auto-opens on this step's first
+                // appearance, so without closing it first, this sheet
+                // can't present on top of the one already up.
+                isPickerPresented = false
+                showGetInspired = true
+            } label: {
+                // Mirrored invisible icon on the right balances the real
+                // one on the left, so the HStack is symmetric and "Get
+                // Inspired" lands exactly centered on the viewport — the
+                // real icon then makes the visible cluster read as
+                // off-center, which is the intended effect.
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22, weight: .semibold))
+                        .blackHalo()
+                    Text("Get Inspired")
+                        .font(.system(size: 22, weight: .semibold))
+                        .blackHalo()
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22, weight: .semibold))
+                        .opacity(0)
+                }
+            }
+            .buttonStyle(.plain)
+            .offset(y: -5)
+        }
         .fullScreenCover(isPresented: $isCameraPresented) {
             CameraCaptureView(
                 onCapture: { image in
@@ -612,7 +678,7 @@ struct ChoosePhotoStepView: View {
                     base.draw(in: drawRect)
                 }
                 var thumbs: [PostcardFilter: UIImage] = [:]
-                for filter in PostcardFilter.allCases {
+                for filter in PostcardFilter.pickerCases {
                     thumbs[filter] = filter.apply(to: small)
                 }
                 return thumbs

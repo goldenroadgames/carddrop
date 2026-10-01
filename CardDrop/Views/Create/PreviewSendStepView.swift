@@ -982,7 +982,9 @@ struct SendOptionsView: View {
                 recipientName: draft.recipientName.isEmpty ? nil : draft.recipientName,
                 recipientPhone: draft.recipientPhone.isEmpty ? nil : draft.recipientPhone,
                 recipientEmail: draft.recipientEmail.isEmpty ? nil : draft.recipientEmail,
-                messagePreview: String(draft.message.prefix(100))
+                messagePreview: String(draft.message.prefix(100)),
+                designFeatures: draft.designFeatureSummary(),
+                beforeImage: draft.image
             )
             cardSendResult = result
             hasSent = true

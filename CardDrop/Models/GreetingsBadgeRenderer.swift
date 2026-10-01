@@ -86,7 +86,7 @@ enum GreetingsBadgeRenderer {
             scriptColorOverride: scriptColorOverride,
             drawsBackground: false,
             extraHorizontalPad: extraHorizontalPad,
-            isTilt: overlay.fixedPosition == .left,
+            isTilt: overlay.fixedPosition.isTilt,
             scriptBorderColor: scriptBorderColor)
 
         let renderer = ImageRenderer(content: view)

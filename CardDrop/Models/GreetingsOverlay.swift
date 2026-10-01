@@ -86,16 +86,25 @@ enum GreetingsFixedPosition: String, CaseIterable {
     case center   // horizontal center, inset 20px from top, no rotation
     case left     // tilted, hugging the top-left while guaranteeing 0.5in
                   // clearance from the card's left/right edges — see center(...)
+    // Identical to Tilt, except the background also fills the top-left corner
+    // that Tilt leaves exposed (so the badge is a polygon, not just a tilted
+    // band). Raw value deliberately NOT "corner": an older, removed position
+    // used that name, and old drafts must not decode into this one.
+    case corner = "tiltFill"
 
     var displayName: String {
         switch self {
         case .center: return "Center"
         case .left:   return "Tilt"
+        case .corner: return "Corner"
         }
     }
 
+    /// Tilt and Corner share all placement/rotation/clearance math.
+    var isTilt: Bool { self == .left || self == .corner }
+
     func rotationDegrees(isLandscape: Bool) -> Double {
-        guard self == .left else { return 0 }
+        guard isTilt else { return 0 }
         return -8
     }
 
@@ -116,7 +125,7 @@ enum GreetingsFixedPosition: String, CaseIterable {
         case .center:
             // Fully bled to the top edge — no inset. Still horizontally centered.
             return CGPoint(x: canvasSize.width / 2, y: h / 2)
-        case .left:
+        case .left, .corner:
             let theta = rotationDegrees(isLandscape: isLandscape) * .pi / 180
             let cosT = CGFloat(cos(theta)), sinT = CGFloat(sin(theta))
             // Axis-aligned bounding box of the WxH badge once rotated by
@@ -157,6 +166,56 @@ enum GreetingsFixedPosition: String, CaseIterable {
     }
 }
 
+// MARK: - Corner background  (the "Corner" position's polygon)
+//
+// One filled path, in the CANVAS's own coordinate space (not the rotated
+// ribbon's): the rotated ribbon rectangle PLUS the triangle above the ribbon's
+// top edge, out to the card's top-left corner — the area Tilt leaves exposed.
+// A single path filled once, so the opacity slider never shows a seam or a
+// darker overlap where the two pieces meet. The triangle is built from the
+// ribbon's real top-edge line (same transform as the drawn ribbon), so it
+// stays exactly flush with it for any word/orientation, and it's pushed out
+// past the canvas (`overshoot`) and tucked slightly under the ribbon so no
+// hairline shows at the seam.
+struct GreetingsCornerBackgroundShape: Shape {
+    var ribbonCenter: CGPoint   // ribbon center, in the same units as the rest
+    var ribbonSize: CGSize      // un-rotated ribbon width/height
+    var theta: CGFloat          // rotation, radians (same sign as rotationEffect)
+    var overshoot: CGFloat      // how far past the canvas edges to extend
+    var tuck: CGFloat           // how far the triangle overlaps under the ribbon
+
+    func path(in rect: CGRect) -> Path {
+        let c = cos(theta), s = sin(theta)
+        func rot(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: ribbonCenter.x + x * c - y * s, y: ribbonCenter.y + x * s + y * c)
+        }
+        let hw = ribbonSize.width / 2, hh = ribbonSize.height / 2
+        var p = Path()
+        // Ribbon, clockwise on screen.
+        p.move(to: rot(-hw, -hh))
+        p.addLine(to: rot(hw, -hh))
+        p.addLine(to: rot(hw, hh))
+        p.addLine(to: rot(-hw, hh))
+        p.closeSubpath()
+
+        // The ribbon's top-edge line, nudged `tuck` down into the ribbon.
+        let p0 = rot(-hw, -hh + tuck)
+        let d = CGPoint(x: c, y: s)
+        guard abs(d.x) > 0.0001, abs(d.y) > 0.0001 else { return p }
+        let minX = rect.minX - overshoot, minY = rect.minY - overshoot
+        let tY = (minY - p0.y) / d.y                      // where the line reaches y = minY
+        let tX = (minX - p0.x) / d.x                      // where the line reaches x = minX
+        let atTop  = CGPoint(x: p0.x + tY * d.x, y: minY)
+        let atLeft = CGPoint(x: minX, y: p0.y + tX * d.y)
+        // Triangle (also clockwise): canvas corner → along the top → down the line to the left edge.
+        p.move(to: CGPoint(x: minX, y: minY))
+        p.addLine(to: atTop)
+        p.addLine(to: atLeft)
+        p.closeSubpath()
+        return p
+    }
+}
+
 // MARK: - Greetings Safe Zone  (photo gesture-clamp boundary)
 
 extension GreetingsOverlay {
@@ -182,13 +241,13 @@ extension GreetingsOverlay {
         let geometry = GreetingsGeometry(
             word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize,
             scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0,
-            isTilt: overlay.fixedPosition == .left)
+            isTilt: overlay.fixedPosition.isTilt)
         let badgeSize = geometry.estimatedBadgeSize()
         let canvasSize = CGSize(width: referenceWidth, height: referenceHeight)
         let center = overlay.fixedPosition.center(badgeSize: badgeSize, canvasSize: canvasSize)
 
         let bottomY: CGFloat
-        if overlay.fixedPosition == .left {
+        if overlay.fixedPosition.isTilt {
             // Use the bottom-RIGHT corner's actual (rotated) Y specifically
             // — not the overall lowest point of the rotated bounding box
             // (which is the bottom-left corner, given this rotation
@@ -210,10 +269,13 @@ extension GreetingsOverlay {
 // background-opacity slider)
 
 enum GreetingsBadgeColor: String, CaseIterable, Identifiable {
-    // .transparent listed first, then the same order as CanvasBackgroundColor's
-    // swatches. GreetingsOverlay.badgeColorChoice's own default stays .blue —
-    // adding this option here doesn't change what a new badge starts as.
-    case transparent, white, black, blue, maroon, cream
+    // Declaration order IS the swatch order (the panel and the quick-add
+    // dialog both iterate allCases): transparent, blue, red, yellow, black,
+    // white. ("maroon" is the red swatch and "cream" the yellow one — the names
+    // are kept because they're the persisted raw values.) Safe to reorder:
+    // saved drafts store the raw string, not the position.
+    // GreetingsOverlay.badgeColorChoice's own default stays .blue.
+    case transparent, blue, maroon, cream, black, white
 
     var id: String { rawValue }
 
@@ -222,7 +284,9 @@ enum GreetingsBadgeColor: String, CaseIterable, Identifiable {
         case .transparent: return .clear
         case .blue:   return .brandBlue
         case .maroon: return Color(red: 0.85, green: 0.24, blue: 0.24)
-        case .cream:  return Color(red: 0.85, green: 0.65, blue: 0.20)
+        // The yellow background option (case is still named .cream — its raw
+        // value is persisted in saved drafts) — now the app's standard yellow.
+        case .cream:  return .standardYellow
         case .black:  return .black
         case .white:  return .white
         }
@@ -256,7 +320,7 @@ enum GreetingsScriptColor: String, CaseIterable, Identifiable {
         switch self {
         case .yellow: return .black
         case .white:  return .black
-        case .black:  return Color(white: 0.75)
+        case .black:  return .greetingsScriptYellow
         case .red:    return .black
         case .blue:   return .black
         }
@@ -304,6 +368,11 @@ struct GreetingsGeometry {
     static let bigWordFontName = "BowlbyOneSC-Regular"
 
     let displayWord: String
+    // True when the big word was left blank. displayWord still holds the
+    // "Home" fallback so every size/layout calculation stays stable (same
+    // trick as metricsScriptText for the intro line), but the caption view
+    // draws nothing for it — a blank Marquee stays blank, not "HOME".
+    let wordIsBlank: Bool
     let wordCount: Int    // raw overlay.word.count (before the "Home" empty-word fallback) — used to gate bigWordPull
     let scriptFontSize:  CGFloat
     let bigWordFontSize: CGFloat
@@ -338,8 +407,9 @@ struct GreetingsGeometry {
     }
 
     init(word: String, scriptText rawScriptText: String, fontName: String, bigWordFontSize: CGFloat, scriptFontSize: CGFloat, isLandscape: Bool, printScale: CGFloat, isTilt: Bool = false) {
-        let effectiveWord = word.isEmpty ? "Home" : word.uppercased()
+        let effectiveWord = word.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Home" : word.uppercased()
         displayWord = effectiveWord
+        wordIsBlank = word.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         wordCount = word.count
         self.bigWordFontSize = bigWordFontSize
         self.scriptFontSize = scriptFontSize

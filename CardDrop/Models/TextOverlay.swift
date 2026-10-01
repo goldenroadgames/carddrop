@@ -72,13 +72,31 @@ enum TextBgStyle: String, CaseIterable {
     case box     = "Box"
     case speech  = "Speech"
     case thought = "Thought"
+    case rectangle = "Rectangle"
 
     var systemImage: String {
         switch self {
-        case .none:    return "square.slash"
-        case .box:     return "rectangle"
-        case .speech:  return "message.fill"
-        case .thought: return "cloud.fill"
+        case .none:      return "square.slash"
+        case .box:       return "capsule.fill"
+        case .speech:    return "message.fill"
+        case .thought:   return "cloud.fill"
+        case .rectangle: return "rectangle.fill"
+        }
+    }
+
+    // Order the style buttons appear in, in both the Caption sheet and the
+    // edit panel.
+    static let displayOrder: [TextBgStyle] = [.speech, .thought, .rectangle, .box, .none]
+
+    // User-facing names for the Caption sheet (rawValues are persisted, so
+    // .box stays "Box" underneath while showing as "Pill").
+    var displayName: String {
+        switch self {
+        case .none:      return "Float"
+        case .box:       return "Pill"
+        case .speech:    return "Speech"
+        case .thought:   return "Thought"
+        case .rectangle: return "Rectangle"
         }
     }
 }
@@ -96,29 +114,6 @@ enum TailHPosition: Int, CaseIterable {
 
     var next: TailHPosition {
         TailHPosition(rawValue: (rawValue + 1) % TailHPosition.allCases.count) ?? .left
-    }
-}
-
-// MARK: - Text Halo Color  (same "ring of offset copies" technique as the
-// Greetings banner's script-text halo — see TextOverlayBubbleView.body —
-// but user-choosable rather than tied to a fixed script-color swatch table,
-// and off (.transparent) by default.)
-
-enum TextHaloColor: String, CaseIterable, Identifiable {
-    case transparent, black, white, yellow, red, blue, green
-
-    var id: String { rawValue }
-
-    var color: Color {
-        switch self {
-        case .transparent: return .clear
-        case .black:       return .black
-        case .white:        return .white
-        case .yellow:       return .greetingsScriptYellow
-        case .red:          return .greetingsRed
-        case .blue:         return .greetingsBlue
-        case .green:        return .greetingsGreen
-        }
     }
 }
 
@@ -140,9 +135,29 @@ struct TextOverlay: Identifiable {
     // Whether the Box/Speech/Thought background shape draws its outline —
     // on by default (matches the look every existing overlay already has).
     var borderEnabled: Bool = true
-    // Halo behind the text glyphs themselves (independent of the bgStyle
-    // shape's own border above) — off (.transparent) by default.
-    var haloColorChoice: TextHaloColor = .transparent
+    // Border color when enabled: black (default, the look every existing
+    // overlay has) or the text's own color. The edit panel's Border pill
+    // cycles Off → Black → Font color.
+    var borderUsesFontColor: Bool = false
+    var borderColor: Color { borderUsesFontColor ? textColor : .black }
+    // True while the width is still the automatic fit-to-text size — editing
+    // the text re-fits it. The Width slider clears this, so a width the user
+    // set by hand is left alone.
+    var widthAutoFit: Bool = false
+    // Halo behind the text glyphs — on by default, but only drawn (and only
+    // offered in the edit panel) when the style is Float (.none); with a
+    // container it adds nothing. Its color isn't chosen: see haloColor.
+    var haloEnabled: Bool = true
+
+    // Black for most text colors, white when the text is very dark (Rec. 601
+    // luma below this cutoff) — tune here.
+    private static let haloWhiteBelowLuma: CGFloat = 0.2
+    var haloColor: Color {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(textColor).getRed(&r, green: &g, blue: &b, alpha: &a)
+        let luma = 0.299 * r + 0.587 * g + 0.114 * b
+        return luma < Self.haloWhiteBelowLuma ? .white : .black
+    }
 
     static let availableFonts: [(name: String, displayName: String)] = [
         ("Georgia",            "Georgia"),
@@ -182,20 +197,103 @@ struct TextOverlay: Identifiable {
         TextOverlay.resolvedFontName(base: fontName, bold: isBold, italic: isItalic)
     }
 
+    // Extra breathing room the oval speech bubble and cloud need on top of
+    // their fixed padding, as a fraction of the text block's width (H) and
+    // height (V) per side. A rectangle of text only fits inside an oval if its
+    // corners do, so the padding has to grow with the text block — a fixed pad
+    // lets the ends of a wrapped last line poke outside the outline. One place
+    // to tune; the thought cloud needs much less than the speech oval.
+    static func bubbleExtraFactors(for style: TextBgStyle) -> (h: CGFloat, v: CGFloat) {
+        switch style {
+        case .speech:  return (0.05, 0.20)
+        case .thought: return (0.03, 0.05)
+        default:       return (0, 0)
+        }
+    }
+
+    // Wrapped text height at boxWidth (already-scaled units).
+    func measuredTextHeight(boxWidth: CGFloat, scale: CGFloat) -> CGFloat {
+        let size = min(fontSize, 48) * scale
+        let font = UIFont(name: resolvedFontName, size: size) ?? UIFont.systemFont(ofSize: size)
+        let bounding = ((text.isEmpty ? " " : text) as NSString).boundingRect(
+            with: CGSize(width: boxWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        )
+        return ceil(bounding.height)
+    }
+
+    // The extra padding above, in the same (already scaled) units as
+    // boxWidth. Text height is measured, matching how containerSize does it.
+    func bubbleExtraPadding(boxWidth: CGFloat, scale: CGFloat) -> CGSize {
+        let k = Self.bubbleExtraFactors(for: bgStyle)
+        guard k.h > 0 || k.v > 0 else { return .zero }
+        return CGSize(width: k.h * boxWidth,
+                      height: k.v * measuredTextHeight(boxWidth: boxWidth, scale: scale))
+    }
+
+    // Space reserved on the tail side. The traced speech-bubble art stretches
+    // over the WHOLE rect, and its tail is ~19% of the art's height (the oval
+    // body is the other ~81%). A fixed-size reserve therefore left the oval
+    // smaller than the padding assumed — and, because the body sits high in
+    // the art, the text sat below the oval's center. Reserving the tail as a
+    // fixed fraction of the oval-body height makes the oval exactly text +
+    // padding, with the text vertically centered in it.
+    func tailReserve(boxWidth: CGFloat, scale: CGFloat) -> CGFloat {
+        switch bgStyle {
+        case .speech:
+            let extra = bubbleExtraPadding(boxWidth: boxWidth, scale: scale)
+            let ovalHeight = measuredTextHeight(boxWidth: boxWidth, scale: scale)
+                + 2 * (12 * scale + extra.height)
+            return SpeechBubbleShape.tailToBodyRatio * ovalHeight
+        case .thought:
+            return ThoughtBubbleShape.tailHeight(scale: scale)
+        default:
+            return 0
+        }
+    }
+
+    // Sets normalizedWidth so the text column just fits the current text on one
+    // line, capped so the whole bubble is at most 0.66 of the canvas width
+    // (longer text then wraps). Only sizes the starting width — the Width
+    // slider's own range is unchanged. Measured in editor points at
+    // canvasWidth, matching how normalizedWidth is later scaled. No-op for
+    // blank text or legacy overlays with no canvasWidth.
+    mutating func autoFitWidth() {
+        guard !text.isEmpty, canvasWidth > 0 else { return }
+        let size = min(fontSize, 48)
+        let font = UIFont(name: resolvedFontName, size: size) ?? UIFont.systemFont(ofSize: size)
+        let widest = text.components(separatedBy: .newlines)
+            .map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+            .max() ?? 0
+        let pad: CGFloat
+        switch bgStyle {
+        case .thought:                  pad = 2 + 2
+        case .box, .speech, .rectangle: pad = 12
+        case .none:                     pad = 5
+        }
+        let fitted = ceil(widest) + 2
+        // Whole bubble (text + fixed pad + proportional extra) stays within 0.66.
+        let maxText = (0.66 * canvasWidth - 2 * pad) / (1 + 2 * Self.bubbleExtraFactors(for: bgStyle).h)
+        let minText = min(0.92, 80 / canvasWidth) * canvasWidth
+        normalizedWidth = max(minText, min(fitted, maxText)) / canvasWidth
+    }
+
     init(at position: CGPoint = CGPoint(x: 0.5, y: 0.5), canvasWidth: CGFloat = 0) {
         id                 = UUID()
         text               = ""
         normalizedPosition = position
         normalizedWidth    = 0.5
         fontName           = "Georgia"
-        fontSize           = 20
+        fontSize           = 28
         self.canvasWidth   = canvasWidth
         textColor          = .black
         bgStyle            = .box
         bgColor            = .white
         tailFlippedV       = false
         rotation           = 0
-        isBold             = false
+        isBold             = true
         isItalic           = false
     }
 }
@@ -216,6 +314,30 @@ struct TextOverlay: Identifiable {
 // at small sizes) — two independent Text layouts at e.g. 18pt vs 79pt can
 // wrap differently even at an identical proportional width, which is
 // exactly the bug this sidesteps.
+// 12 radius-0 shadows, same offsets as blackHalo() in ChoosePhotoStepView
+// (×unit): inner diagonals fill counters, outer cardinals/diagonals set the
+// thickness.
+private struct HaloShadowStack: ViewModifier {
+    let color: Color
+    let unit: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .shadow(color: color, radius: 0, x:  0.35 * unit, y:  0.35 * unit)
+            .shadow(color: color, radius: 0, x: -0.35 * unit, y:  0.35 * unit)
+            .shadow(color: color, radius: 0, x:  0.35 * unit, y: -0.35 * unit)
+            .shadow(color: color, radius: 0, x: -0.35 * unit, y: -0.35 * unit)
+            .shadow(color: color, radius: 0, x:  0.85 * unit, y: 0)
+            .shadow(color: color, radius: 0, x: -0.85 * unit, y: 0)
+            .shadow(color: color, radius: 0, x: 0, y:  0.85 * unit)
+            .shadow(color: color, radius: 0, x: 0, y: -0.85 * unit)
+            .shadow(color: color, radius: 0, x:  0.6 * unit, y:  0.6 * unit)
+            .shadow(color: color, radius: 0, x: -0.6 * unit, y:  0.6 * unit)
+            .shadow(color: color, radius: 0, x:  0.6 * unit, y: -0.6 * unit)
+            .shadow(color: color, radius: 0, x: -0.6 * unit, y: -0.6 * unit)
+    }
+}
+
 struct TextOverlayBubbleView: View {
     let overlay: TextOverlay
     // Multiplies every absolute-pt constant below (font size, padding, tail
@@ -234,7 +356,7 @@ struct TextOverlayBubbleView: View {
     // well past 100-150pt once `scale` — the editor-to-print multiplier,
     // often 6-9x — is applied), which read as wrapping just silently
     // stopping above some threshold.
-    private var scaledFontSize: CGFloat { min(overlay.fontSize, 36) * scale }
+    private var scaledFontSize: CGFloat { min(overlay.fontSize, 48) * scale }
 
     // SwiftUI's Font.custom(name:size:) doesn't reliably size custom fonts
     // when rendered through ImageRenderer (the print bake) — it comes out a
@@ -252,60 +374,59 @@ struct TextOverlayBubbleView: View {
     }
 
     private var topPad: CGFloat {
-        if overlay.bgStyle == .speech  && overlay.tailFlippedV { return SpeechBubbleShape.tailHeight(scale: scale) }
-        if overlay.bgStyle == .thought && overlay.tailFlippedV { return ThoughtBubbleShape.tailHeight(scale: scale) }
-        return 0
+        overlay.tailFlippedV ? overlay.tailReserve(boxWidth: boxWidth, scale: scale) : 0
     }
     private var botPad: CGFloat {
-        if overlay.bgStyle == .speech  && !overlay.tailFlippedV { return SpeechBubbleShape.tailHeight(scale: scale) }
-        if overlay.bgStyle == .thought && !overlay.tailFlippedV { return ThoughtBubbleShape.tailHeight(scale: scale) }
-        return 0
+        overlay.tailFlippedV ? 0 : overlay.tailReserve(boxWidth: boxWidth, scale: scale)
     }
     // The thought bubble's scalloped cloud edge dips inward of its bounding
     // box between bumps, so text needs extra clearance beyond the plain
     // box/speech-bubble padding to stay clear of the outline.
     private var cloudExtraHPadding: CGFloat { (overlay.bgStyle == .thought ? 2 : 0) * scale }
     private var cloudExtraVPadding: CGFloat { (overlay.bgStyle == .thought ? 2 : 0) * scale }
+    // Multiplier on the Get Inspired halo thickness — 1.0 matches it exactly
+    // (relative to font size); raise/lower to make the caption halo bolder/finer.
+    private static let haloThickness: CGFloat = 0.5
+
+    private var extraPad: CGSize { overlay.bubbleExtraPadding(boxWidth: boxWidth, scale: scale) }
     private var basePadH: CGFloat {
         switch overlay.bgStyle {
         case .thought:       return 2 * scale
-        case .box, .speech:  return 12 * scale
+        case .box, .speech, .rectangle:  return 12 * scale
         case .none:          return 5 * scale
         }
     }
     private var basePadV: CGFloat {
         switch overlay.bgStyle {
         case .thought:       return 2 * scale
-        case .box, .speech:  return 12 * scale
+        case .box, .speech, .rectangle:  return 12 * scale
         case .none:          return 4 * scale
         }
     }
 
     var body: some View {
         ZStack {
-            // Halo — same "ring of offset copies, zero blur" technique as
-            // the Greetings banner's script-text halo (see
-            // GreetingsCaptionView.body), just with a user-chosen color
-            // instead of a fixed per-swatch table, and scaled off THIS
-            // overlay's own scaledFontSize rather than scriptFontSize so it
-            // tracks the font-size slider. Skipped entirely (no extra
-            // copies rendered) when off — the default — so existing
-            // overlays render exactly as before.
-            if overlay.haloColorChoice != .transparent {
-                let haloRadius = scaledFontSize * 0.06
-                ForEach(Array(stride(from: 0.0, to: 360.0, by: 15.0)), id: \.self) { angle in
-                    let rad = angle * .pi / 180
-                    textView
-                        .foregroundColor(overlay.haloColorChoice.color)
-                        .offset(x: cos(rad) * haloRadius, y: sin(rad) * haloRadius)
-                }
+            // Halo — the "Get Inspired" label's technique (see blackHalo() in
+            // ChoosePhotoStepView): stacked zero-blur shadows at small offsets,
+            // which fill the counters of open letters solid and give a crisp
+            // outline. Its offsets were tuned on 22pt text, so they're scaled
+            // by scaledFontSize / 22 to track the size slider and the
+            // editor→print scale. Skipped entirely when off (the default).
+            // Drawn as its own layer in the halo color (text + shadows all in
+            // that color), with the real text stacked on top, so the halo can
+            // never end up in front of the glyphs.
+            if overlay.haloEnabled && overlay.bgStyle == .none {
+                textView
+                    .foregroundColor(overlay.haloColor)
+                    .modifier(HaloShadowStack(color: overlay.haloColor,
+                                              unit: scaledFontSize / 22 * Self.haloThickness))
             }
             textView
                 .foregroundColor(overlay.textColor)
         }
-        .padding(.horizontal, basePadH + cloudExtraHPadding)
-        .padding(.top,    basePadV + cloudExtraVPadding + topPad)
-        .padding(.bottom, basePadV + cloudExtraVPadding + botPad)
+        .padding(.horizontal, basePadH + cloudExtraHPadding + extraPad.width)
+        .padding(.top,    basePadV + cloudExtraVPadding + extraPad.height + topPad)
+        .padding(.bottom, basePadV + cloudExtraVPadding + extraPad.height + botPad)
         .background(bgShape)
     }
 
@@ -346,7 +467,15 @@ struct TextOverlayBubbleView: View {
                 .fill(overlay.bgColor)
                 .overlay {
                     if overlay.borderEnabled {
-                        RoundedRectangle(cornerRadius: 30 * scale).stroke(Color.black, lineWidth: 3 * scale)
+                        RoundedRectangle(cornerRadius: 30 * scale).stroke(overlay.borderColor, lineWidth: 3 * scale)
+                    }
+                }
+        case .rectangle:
+            RoundedRectangle(cornerRadius: 10 * scale)
+                .fill(overlay.bgColor)
+                .overlay {
+                    if overlay.borderEnabled {
+                        RoundedRectangle(cornerRadius: 10 * scale).stroke(overlay.borderColor, lineWidth: 3 * scale)
                     }
                 }
         case .speech:
@@ -363,7 +492,7 @@ struct TextOverlayBubbleView: View {
                 .fill(overlay.bgColor)
                 .overlay {
                     if overlay.borderEnabled {
-                        bubble.stroke(Color.black, lineWidth: 3 * scale)
+                        bubble.stroke(overlay.borderColor, lineWidth: 3 * scale)
                     }
                 }
         case .thought:
@@ -377,7 +506,7 @@ struct TextOverlayBubbleView: View {
             ZStack {
                 if overlay.borderEnabled {
                     ThoughtBubbleShape(tailOnBottom: !overlay.tailFlippedV, inflate: 3, scale: scale)
-                        .fill(Color.black)
+                        .fill(overlay.borderColor)
                 }
                 ThoughtBubbleShape(tailOnBottom: !overlay.tailFlippedV, scale: scale)
                     .fill(overlay.bgColor)
@@ -405,6 +534,10 @@ struct SpeechBubbleShape: Shape {
     var scale: CGFloat = 1
     private static let baseTailHeight: CGFloat = 16
     static func tailHeight(scale: CGFloat) -> CGFloat { baseTailHeight * scale }
+    // Tail height as a fraction of the oval body's height in the traced art
+    // below (body ≈ 261.6 units tall, tail ≈ 61 units → 0.233). See
+    // TextOverlay.tailReserve.
+    static let tailToBodyRatio: CGFloat = 0.233
 
     // Hand-traced speech-bubble artwork (outer silhouette only — the source
     // SVG's second subpath is an inner contour of opposite winding used to

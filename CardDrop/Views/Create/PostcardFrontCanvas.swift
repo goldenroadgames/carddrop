@@ -179,7 +179,8 @@ struct PostcardFrontCanvas: View {
             // axis) between the two centers, applied as a live offset on
             // the text image so one shared rotation/position transform
             // serves both.
-            let isTiltPos = greeting.fixedPosition == .left
+            let isTiltPos = greeting.fixedPosition.isTilt
+            let isCorner = greeting.fixedPosition == .corner
             let rotationDeg = greeting.fixedPosition.rotationDegrees(isLandscape: isLandscapeGreetings)
             let theta = rotationDeg * .pi / 180
             let t: CGFloat = isTiltPos ? (greetingsReferenceWidth / 2 - center.x) / cos(theta) : 0
@@ -201,8 +202,8 @@ struct PostcardFrontCanvas: View {
                 : (isTiltPos ? ribbonWidthPrintScale * greetingsDisplayScale : w)
             // The bitmap itself has a transparent background (see
             // GreetingsBadgeRenderer) — draw the badge color underneath it here.
-            ZStack {
-                Rectangle().fill(greeting.badgeColorChoice.color.opacity(greeting.backgroundOpacity))
+            let badgeLayer = ZStack {
+                Rectangle().fill(isCorner ? Color.clear : greeting.badgeColorChoice.color.opacity(greeting.backgroundOpacity))
                     .frame(width: bgWidth, height: h)
                 Image(uiImage: rendered.image)
                     .resizable()
@@ -212,6 +213,26 @@ struct PostcardFrontCanvas: View {
             .frame(width: bgWidth, height: h)
             .rotationEffect(Angle(degrees: rotationDeg))
             .position(x: ribbonCenter.x * greetingsDisplayScale, y: ribbonCenter.y * greetingsDisplayScale)
+
+            if isCorner {
+                // Corner position: ribbon + the exposed top-left corner as one
+                // filled path in canvas space, under the badge (same shape the
+                // live editor draws — see GreetingsCornerBackgroundShape).
+                ZStack(alignment: .topLeading) {
+                    GreetingsCornerBackgroundShape(
+                        ribbonCenter: CGPoint(x: ribbonCenter.x * greetingsDisplayScale, y: ribbonCenter.y * greetingsDisplayScale),
+                        ribbonSize: CGSize(width: ribbonWidthPrintScale * greetingsDisplayScale, height: h),
+                        theta: CGFloat(theta),
+                        overshoot: 300 * greetingsDisplayScale,
+                        tuck: 2 * greetingsDisplayScale
+                    )
+                    .fill(greeting.badgeColorChoice.color.opacity(greeting.backgroundOpacity))
+                    badgeLayer
+                }
+                .frame(width: imageAreaSize.width, height: imageAreaSize.height)
+            } else {
+                badgeLayer
+            }
         }
     }
 

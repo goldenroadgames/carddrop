@@ -131,10 +131,12 @@ enum CardUploadService {
         recipientName: String?,
         recipientPhone: String?,
         recipientEmail: String?,
-        messagePreview: String?
+        messagePreview: String?,
+        designFeatures: String? = nil,
+        beforeImage: UIImage? = nil
     ) async throws -> CardSendResult {
 
-        try await uploadDigitalCardImages(cardID: cardID, frontData: frontData, backData: backData, back6x9Data: back6x9Data)
+        try await uploadDigitalCardImages(cardID: cardID, frontData: frontData, backData: backData, back6x9Data: back6x9Data, beforeImage: beforeImage)
 
         // 3. Call send-card Edge Function
         return try await callSendCardFunction(
@@ -147,7 +149,8 @@ enum CardUploadService {
             recipientName: recipientName,
             recipientPhone: recipientPhone,
             recipientEmail: recipientEmail,
-            messagePreview: messagePreview
+            messagePreview: messagePreview,
+            designFeatures: designFeatures
         )
     }
 
@@ -160,7 +163,7 @@ enum CardUploadService {
     /// digitally-sent ones: a physical postcard's back-of-card QR code links
     /// to /card/{cardID} too, so without this upload that link 404s even
     /// though the card was successfully mailed.
-    static func uploadDigitalCardImages(cardID: UUID, frontData: Data, backData: Data, back6x9Data: Data? = nil) async throws {
+    static func uploadDigitalCardImages(cardID: UUID, frontData: Data, backData: Data, back6x9Data: Data? = nil, beforeImage: UIImage? = nil) async throws {
         let idStr = cardID.uuidString.lowercased()
         guard let sender = try? await supabase.auth.session.user else {
             throw UploadError.renderFailed
@@ -183,6 +186,16 @@ enum CardUploadService {
                 options: FileOptions(contentType: "image/jpeg", upsert: true)
             )
 
+        if let thumbData = scaledDownThumbnail(fromFrontData: frontData) {
+            try await supabase.storage
+                .from("card-images")
+                .upload(
+                    "\(senderID)/\(idStr)_thumb.jpg",
+                    data: thumbData,
+                    options: FileOptions(contentType: "image/jpeg", upsert: true)
+                )
+        }
+
         if let back6x9Data {
             try await supabase.storage
                 .from("card-images")
@@ -192,6 +205,60 @@ enum CardUploadService {
                     options: FileOptions(contentType: "image/jpeg", upsert: true)
                 )
         }
+
+        // "Before" photo — the original, pre-edit photo, downscaled for the
+        // Inspire gallery's before/after toggle. Display-only, never
+        // reconstructed/printed from. Optional: older sends / drafts without
+        // an original image on disk simply don't get one. Plus a small
+        // thumbnail of it for the Inspire grid tiles — same idea as the
+        // front's own _thumb.jpg, so the grid isn't loading full-res images.
+        if let beforeImage {
+            if let beforeData = resizedJPEG(from: beforeImage, maxDimension: 1500, quality: 0.75) {
+                try await supabase.storage
+                    .from("card-images")
+                    .upload(
+                        "\(senderID)/\(idStr)_before.jpg",
+                        data: beforeData,
+                        options: FileOptions(contentType: "image/jpeg", upsert: true)
+                    )
+            }
+            if let beforeThumbData = resizedJPEG(from: beforeImage, maxDimension: 600, quality: 0.6) {
+                try await supabase.storage
+                    .from("card-images")
+                    .upload(
+                        "\(senderID)/\(idStr)_before_thumb.jpg",
+                        data: beforeThumbData,
+                        options: FileOptions(contentType: "image/jpeg", upsert: true)
+                    )
+            }
+        }
+    }
+
+    // MARK: - Admin thumbnail / before-photo scaling
+
+    /// Downscales `image` to `maxDimension` on its long edge and re-encodes
+    /// as JPEG at `quality`. Shared by the admin thumbnail and the "before"
+    /// (original, pre-edit) photo upload — both are display-only, never
+    /// reconstructed/printed from.
+    private static func resizedJPEG(from image: UIImage, maxDimension: CGFloat, quality: CGFloat) -> Data? {
+        let longEdge = max(image.size.width, image.size.height)
+        guard longEdge > 0 else { return nil }
+        let scale = min(1, maxDimension / longEdge)
+        let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+
+        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: targetSize))
+        }
+        return resized.jpegData(compressionQuality: quality)
+    }
+
+    /// A small (max 600pt on the long edge), lower-quality JPEG of the front
+    /// image — for fast-loading admin/moderation lists later, not the
+    /// full-resolution card display. Returns nil if frontData can't decode.
+    private static func scaledDownThumbnail(fromFrontData frontData: Data, maxDimension: CGFloat = 600) -> Data? {
+        guard let image = UIImage(data: frontData) else { return nil }
+        return resizedJPEG(from: image, maxDimension: maxDimension, quality: 0.6)
     }
 
     // MARK: - LOB export upload
@@ -265,7 +332,8 @@ enum CardUploadService {
         recipientName: String?,
         recipientPhone: String?,
         recipientEmail: String?,
-        messagePreview: String?
+        messagePreview: String?,
+        designFeatures: String? = nil
     ) async throws -> CardSendResult {
 
         struct RequestBody: Encodable {
@@ -280,6 +348,7 @@ enum CardUploadService {
             let isPortrait: Bool
             let frontInkMessage: String?
             let backInkMessage: String?
+            let designFeatures: String?
         }
 
         struct ResponseBody: Decodable {
@@ -301,7 +370,8 @@ enum CardUploadService {
             messagePreview: messagePreview,
             isPortrait: isPortrait,
             frontInkMessage: frontInkMessage,
-            backInkMessage: backInkMessage
+            backInkMessage: backInkMessage,
+            designFeatures: designFeatures
         )
 
         do {

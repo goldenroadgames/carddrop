@@ -558,6 +558,9 @@ struct GreetingsCaptionView: View {
                 stripesVertical: preset.stripesVertical,
                 gradientStripes: preset.gradientStripes
             )
+            // A blank Marquee draws nothing but still occupies the layout the
+            // fallback word would, so the badge keeps its normal, stable size.
+            .opacity(g.wordIsBlank ? 0 : 1)
             .padding(.top, 0)
             // Trims ExtrudedBigWordText's own internal bottom pad (bigWordPad,
             // computed above) — was previously a hardcoded -175/-155 that
@@ -624,7 +627,7 @@ struct GreetingsCaptionItemView: View {
     private var fallbackSize: CGSize {
         let scriptFontSize = GreetingsGeometry.scriptFontSize(for: overlay.scriptText, isLandscape: isLandscape, scale: 1.0)
         let bigWordFontSize = GreetingsGeometry.bigWordFontSize(forLetterHeight: 225, maxBadgeWidth: referenceWidth - 2 * GreetingsBadgeRenderer.cardEdgeClearance, word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0)
-        let geometry = GreetingsGeometry(word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0, isTilt: overlay.fixedPosition == .left)
+        let geometry = GreetingsGeometry(word: overlay.word, scriptText: overlay.scriptText, fontName: GreetingsGeometry.bigWordFontName, bigWordFontSize: bigWordFontSize, scriptFontSize: scriptFontSize, isLandscape: isLandscape, printScale: 1.0, isTilt: overlay.fixedPosition.isTilt)
         return geometry.estimatedBadgeSize()
     }
 
@@ -635,7 +638,8 @@ struct GreetingsCaptionItemView: View {
         // rotated-bounding-box math in GreetingsFixedPosition.center(...),
         // not by artificially widening the badge itself.
         let center = overlay.fixedPosition.center(badgeSize: printSize, canvasSize: CGSize(width: referenceWidth, height: referenceWidth * canvasSize.height / canvasSize.width))
-        let isTiltPos = overlay.fixedPosition == .left
+        let isTiltPos = overlay.fixedPosition.isTilt
+        let isCorner = overlay.fixedPosition == .corner
         let rotationDeg = overlay.fixedPosition.rotationDegrees(isLandscape: isLandscape)
         let theta = rotationDeg * .pi / 180
 
@@ -651,7 +655,22 @@ struct GreetingsCaptionItemView: View {
         let t: CGFloat = isTiltPos ? (referenceWidth / 2 - center.x) / cos(theta) : 0
         let ribbonCenter = CGPoint(x: center.x + t * cos(theta), y: center.y + t * sin(theta))
 
-        Group {
+        // Corner position only: ribbon + the exposed top-left corner as ONE
+        // filled path in canvas space, under the badge. (The ribbon's own
+        // rectangle below is then left clear so the two don't double up.)
+        let cornerRibbonWidth = (referenceWidth + 300 - printSize.height * abs(sin(theta))) / abs(cos(theta))
+        let cornerBackground = GreetingsCornerBackgroundShape(
+            ribbonCenter: CGPoint(x: ribbonCenter.x * displayScale, y: ribbonCenter.y * displayScale),
+            ribbonSize: CGSize(width: cornerRibbonWidth * displayScale, height: printSize.height * displayScale),
+            theta: CGFloat(theta),
+            overshoot: 300 * displayScale,
+            tuck: 2 * displayScale
+        )
+        .fill(overlay.badgeColorChoice.color.opacity(overlay.backgroundOpacity))
+        .frame(width: canvasSize.width, height: canvasSize.height)
+        .allowsHitTesting(false)
+
+        let badgeLayer = Group {
             if let img = renderedImage, renderedKey == currentKey {
                 let w = renderedSize.width * displayScale
                 let h = renderedSize.height * displayScale
@@ -674,7 +693,7 @@ struct GreetingsCaptionItemView: View {
                     // Live background layer — responds to the opacity
                     // slider instantly, no re-render of the cached bitmap
                     // (which holds only the letters/script) needed.
-                    Rectangle().fill(overlay.badgeColorChoice.color.opacity(overlay.backgroundOpacity))
+                    Rectangle().fill(isCorner ? Color.clear : overlay.badgeColorChoice.color.opacity(overlay.backgroundOpacity))
                         .frame(width: bgWidth, height: h)
                     Image(uiImage: img)
                         .resizable()
@@ -695,6 +714,18 @@ struct GreetingsCaptionItemView: View {
         .rotationEffect(Angle(degrees: rotationDeg))
         .position(x: ribbonCenter.x * displayScale, y: ribbonCenter.y * displayScale)
         .onTapGesture { onSelect() }
+
+        Group {
+            if isCorner {
+                ZStack(alignment: .topLeading) {
+                    cornerBackground
+                    badgeLayer
+                }
+                .frame(width: canvasSize.width, height: canvasSize.height)
+            } else {
+                badgeLayer
+            }
+        }
         .task(id: currentKey) {
             guard let result = GreetingsBadgeRenderer.render(overlay: overlay, isLandscape: isLandscape) else { return }
             renderedImage = result.image
@@ -769,11 +800,6 @@ struct GreetingsColorSwatch: View {
 
 struct GreetingsCaptionEditPanel: View {
     @Binding var overlay: GreetingsOverlay
-    // Canvas (photo gap) background color — only really matters for Tilt
-    // (fills the exposed corner instead of showing the back photo layer
-    // there), which is why it lives on this panel rather than a general
-    // Style It control.
-    @Binding var canvasBackgroundColor: CanvasBackgroundColor
     // Whether the photo gap shows a mirrored reflection of the front
     // layer's own top edge, or just the plain back layer — only really
     // visible with Tilt, which is why its toggle sits next to that button.
@@ -870,10 +896,9 @@ struct GreetingsCaptionEditPanel: View {
                 }
             }
 
-            // Row 3: Position — 2 mutually exclusive buttons, the Mirror
-            // toggle (only really visible with Tilt), and the canvas
-            // background color swatches (no label — same reasoning), all
-            // on one line.
+            // Row 3: Position — 3 mutually exclusive buttons (Center / Tilt /
+            // Corner) and the Mirror toggle (only really visible with Tilt),
+            // all on one line.
             HStack(spacing: 8) {
                 ForEach(GreetingsFixedPosition.allCases, id: \.self) { pos in
                     Button(pos.displayName) { overlay.fixedPosition = pos }
@@ -893,30 +918,6 @@ struct GreetingsCaptionEditPanel: View {
                 .background(photoMirrorEnabled ? Color.accentColor : Color(.secondarySystemBackground))
                 .foregroundColor(photoMirrorEnabled ? .white : .primary)
                 .cornerRadius(999)
-                HStack(spacing: 6) {
-                    ForEach(CanvasBackgroundColor.allCases) { choice in
-                        Group {
-                            if choice == .transparent {
-                                // Color.clear has nothing to visibly fill —
-                                // show the "none" icon instead so this
-                                // option is actually visible as a swatch.
-                                Image(systemName: "circle.slash")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 24, height: 24)
-                            } else {
-                                Circle().fill(choice.color)
-                                    .frame(width: 24, height: 24)
-                            }
-                        }
-                        .overlay(
-                            Circle()
-                                .stroke(Color.primary.opacity(canvasBackgroundColor == choice ? 0.8 : 0.15),
-                                        lineWidth: canvasBackgroundColor == choice ? 2.5 : 1)
-                        )
-                        .onTapGesture { canvasBackgroundColor = choice }
-                    }
-                }
             }
 
             // Row 3b: "Put subject in front" — cuts the photo's main

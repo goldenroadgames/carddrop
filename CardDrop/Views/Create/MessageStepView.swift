@@ -71,6 +71,14 @@ struct MessageStepView: View {
 
     private static let phraseCategories = ["All", "Basic", "Romantic", "Quirky"]
 
+    // The message box's own font: plain system font, deliberately NOT the
+    // card's Print/Script font (a styled input is harder to proofread, and the
+    // live back preview already shows the real card font). 20pt, up from 17,
+    // for legibility — a fixed size, since the app pins Dynamic Type to .large.
+    private var messageEditorFont: Font {
+        .system(size: 20, weight: .regular)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
 
@@ -122,12 +130,13 @@ struct MessageStepView: View {
                 ZStack(alignment: .topLeading) {
                     if draft.message.isEmpty {
                         Text("Write your message…")
+                            .font(messageEditorFont)
                             .foregroundColor(Color(.placeholderText))
                             .padding(.horizontal, 5)
                             .allowsHitTesting(false)
                     }
                     TextEditor(text: $draft.message)
-                        .font(.system(size: 17, weight: .regular))
+                        .font(messageEditorFont)
                         .frame(maxHeight: .infinity)
                         .scrollContentBackground(.hidden)
                         // Counteracts TextEditor's built-in ~8pt textContainerInset,
@@ -334,6 +343,7 @@ struct MessageStepView: View {
                     }
                     .buttonStyle(.plain)
                     TextField("e.g. Grandma & Grandpa", text: $draft.recipientNickname)
+                        .font(messageEditorFont)   // same size as the message box
                         .textFieldStyle(.plain)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
@@ -351,6 +361,7 @@ struct MessageStepView: View {
                         .font(.system(size: 15, weight: .regular))
                         .foregroundColor(.brandBlue)
                     TextField("e.g. Pookie", text: $draft.senderNickname)
+                        .font(messageEditorFont)   // same size as the message box
                         .textFieldStyle(.plain)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
@@ -409,13 +420,13 @@ private struct CarouselRow: View {
         HStack {
             Button(action: onPrev) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .regular))
+                    .font(.system(size: 20, weight: .regular))
                     .foregroundColor(.brandBlue)
                     .padding(.vertical, 7)
             }
             Spacer(minLength: 8)
             Text(text)
-                .font(.system(size: 17, weight: .regular))
+                .font(.system(size: 20, weight: .regular))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity)
@@ -423,7 +434,7 @@ private struct CarouselRow: View {
             Spacer(minLength: 8)
             Button(action: onNext) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 17, weight: .regular))
+                    .font(.system(size: 20, weight: .regular))
                     .foregroundColor(.brandBlue)
                     .padding(.vertical, 7)
             }
@@ -436,7 +447,8 @@ private struct CarouselRow: View {
 
 // MARK: - Compact segmented control
 
-private struct CompactSegmentedControl: View {
+// (Internal, not private — also used by the Caption edit panel's Border control.)
+struct CompactSegmentedControl: View {
     let options: [String]
     @Binding var selection: String
 
@@ -447,7 +459,7 @@ private struct CompactSegmentedControl: View {
                     selection = option
                 } label: {
                     Text(option)
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.system(size: 15, weight: .regular))
                         .foregroundColor(selection == option ? .primary : .secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)

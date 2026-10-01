@@ -43,6 +43,7 @@ struct PostcardsView: View {
                     .cornerRadius(999)
                 }
                 .padding(.horizontal)
+                .padding(.top, 16)
                 .padding(.bottom, 4)
 
                 Picker("", selection: $selectedTab) {
