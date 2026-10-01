@@ -83,11 +83,12 @@ Deno.serve(async (req) => {
     // ----------------------------------------------------------------
     let promoCodeID: string | null = null;
     let discountCents = 0;
+    let isFreeOrder = false;
 
     if (promoCode) {
       const { data: promo, error: promoError } = await supabase
         .from("zz_promo_codes")
-        .select("id, discount_type, discount_value, applicable_sizes, max_redemptions, per_user_limit, starts_at, expires_at, is_active")
+        .select("id, discount_type, discount_value, applicable_sizes, max_redemptions, per_user_limit, starts_at, expires_at, is_active, is_free, restricted, allowed_email_domains")
         .ilike("code", String(promoCode).trim())
         .maybeSingle();
 
@@ -104,6 +105,12 @@ Deno.serve(async (req) => {
         (!promo.applicable_sizes || promo.applicable_sizes.includes(size));
 
       if (!promoValid) return json({ error: "invalid_promo_code" }, 400);
+
+      // Restricted codes: only allow-listed accounts. Same error as an
+      // invalid code so a restricted code's existence can't be probed.
+      if (promo.restricted && !(await isAllowedForRestrictedPromo(supabase, promo, user))) {
+        return json({ error: "invalid_promo_code" }, 400);
+      }
 
       if (promo.max_redemptions != null) {
         const { count } = await supabase
@@ -126,7 +133,14 @@ Deno.serve(async (req) => {
       }
 
       promoCodeID = promo.id;
-      discountCents = computeDiscountCents(promo.discount_type, promo.discount_value, pricing.amount_cents);
+      if (promo.is_free) {
+        // Free code: the whole price comes off, no 50-cent Stripe floor,
+        // and Stripe is skipped entirely below (see migration 043).
+        isFreeOrder = true;
+        discountCents = pricing.amount_cents;
+      } else {
+        discountCents = computeDiscountCents(promo.discount_type, promo.discount_value, pricing.amount_cents);
+      }
     }
 
     const finalAmountCents = pricing.amount_cents - discountCents;
@@ -183,7 +197,9 @@ Deno.serve(async (req) => {
         card_size: size,
         amount_cents: finalAmountCents,
         currency: pricing.currency,
-        status: "pending_payment",
+        // A free order has nothing to pay, so it starts already 'authorized'
+        // (what confirm-postcard-payment would otherwise flip it to).
+        status: isFreeOrder ? "authorized" : "pending_payment",
         promo_code_id: promoCodeID,
         discount_cents: discountCents,
       })
@@ -193,6 +209,39 @@ Deno.serve(async (req) => {
     if (insertError || !order) {
       console.error("order insert error:", insertError);
       return json({ error: "order_creation_failed", detail: insertError?.message }, 500);
+    }
+
+    // ----------------------------------------------------------------
+    // Free order: no Stripe. Record the redemption now (confirm-postcard-
+    // payment never runs for it) so max_redemptions / per_user_limit count
+    // it immediately. submit-to-lob releases the slot if LOB rejects the
+    // card, so a failed attempt doesn't burn a limited code.
+    // ----------------------------------------------------------------
+    if (isFreeOrder) {
+      const { error: redemptionError } = await supabase
+        .from("promo_code_redemptions")
+        .insert({
+          promo_code_id: promoCodeID,
+          user_id: user.id,
+          order_id: order.id,
+          discount_cents: discountCents,
+        });
+      if (redemptionError) {
+        console.error("Failed to record free-order promo redemption:", redemptionError);
+        await supabase
+          .from("physical_orders")
+          .update({ status: "failed", error_message: "Could not record promo redemption" })
+          .eq("id", order.id);
+        return json({ error: "save_failed", detail: redemptionError.message }, 500);
+      }
+      return json({
+        orderID: order.id,
+        paymentRequired: false,
+        clientSecret: null,
+        amountCents: 0,
+        discountCents,
+        currency: pricing.currency,
+      });
     }
 
     // ----------------------------------------------------------------
@@ -253,6 +302,7 @@ Deno.serve(async (req) => {
 
     return json({
       orderID: order.id,
+      paymentRequired: true,
       clientSecret: intent.client_secret,
       amountCents: finalAmountCents,
       discountCents,
@@ -281,6 +331,47 @@ function computeDiscountCents(discountType: string, discountValue: number, amoun
     raw = discountValue;
   }
   return Math.max(0, Math.min(raw, amountCents - MIN_CHARGE_CENTS));
+}
+
+// Restricted promo codes (see migrations 043/044/045): the caller must have a
+// VERIFIED email (Supabase's email_confirmed_at — the app's send_unlocked flag
+// lives in user_metadata, which the user can write to themselves, so it is NOT
+// proof) AND be allowed: on the allow-list by user id, on it by email, or at
+// an allowed email domain (the domain itself or a subdomain of it).
+async function isAllowedForRestrictedPromo(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  promo: { id: string; allowed_email_domains?: string[] | null },
+  user: { id: string; email?: string | null; email_confirmed_at?: string | null },
+): Promise<boolean> {
+  if (!user.email_confirmed_at) return false;
+
+  const { data: byId } = await supabase
+    .from("zz_promo_code_allowed_users")
+    .select("id")
+    .eq("promo_code_id", promo.id)
+    .eq("user_id", user.id)
+    .limit(1);
+  if (byId && byId.length > 0) return true;
+
+  if (!user.email) return false;
+  const email = user.email.toLowerCase();
+
+  const domain = email.slice(email.lastIndexOf("@") + 1);
+  for (const raw of promo.allowed_email_domains ?? []) {
+    const d = String(raw).toLowerCase();
+    if (domain === d || domain.endsWith("." + d)) return true;
+  }
+
+  // Exact, case-insensitive email match (escape ilike wildcards).
+  const escaped = email.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { data: byEmail } = await supabase
+    .from("zz_promo_code_allowed_users")
+    .select("id")
+    .eq("promo_code_id", promo.id)
+    .ilike("email", escaped)
+    .limit(1);
+  return !!byEmail && byEmail.length > 0;
 }
 
 function json(body: unknown, status = 200): Response {

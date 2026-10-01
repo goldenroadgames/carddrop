@@ -117,7 +117,7 @@ struct PostcardPaymentSheet: View {
                         ProgressView().frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
                     } else {
-                        Text("Pay \(formatted(totalCents))")
+                        Text(totalCents == 0 ? "Place Order" : "Pay \(formatted(totalCents))")
                             .font(.system(size: 17, weight: .semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
@@ -198,6 +198,17 @@ struct PostcardPaymentSheet: View {
             )
             pendingOrderID = intent.orderID
 
+            // Free (promo) order: the server skipped Stripe and the order is
+            // already ready to submit — no payment sheet, no confirm step.
+            if intent.paymentRequired == false {
+                onComplete(true, intent.orderID)
+                return
+            }
+            guard let clientSecret = intent.clientSecret else {
+                intentErrorMessage = "Couldn't start payment. Please try again."
+                return
+            }
+
             var configuration = PaymentSheet.Configuration()
             configuration.merchantDisplayName = "CardDrop"
             configuration.applePay = .init(merchantId: "merchant.com.goldenroadgames", merchantCountryCode: "US")
@@ -212,7 +223,7 @@ struct PostcardPaymentSheet: View {
             // Display mode that actually disables it (confirmed against
             // PaymentSheet.LinkConfiguration.Display in the SDK source).
             configuration.link.display = .never
-            let sheet = PaymentSheet(paymentIntentClientSecret: intent.clientSecret, configuration: configuration)
+            let sheet = PaymentSheet(paymentIntentClientSecret: clientSecret, configuration: configuration)
 
             guard let presenter = Self.topMostViewController() else {
                 intentErrorMessage = "Couldn't present the payment screen. Please try again."

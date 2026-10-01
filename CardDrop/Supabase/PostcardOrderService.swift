@@ -39,7 +39,11 @@ struct PromoCodeValidation: Decodable {
 /// clientSecret is what StripePaymentSheet needs to actually collect payment.
 struct PostcardPaymentIntent: Decodable {
     let orderID: String
-    let clientSecret: String
+    /// False for a free (promo) order — the server skipped Stripe entirely,
+    /// there's no clientSecret, and the order is already ready to submit.
+    /// Missing (nil) is treated as true, i.e. the normal paid path.
+    let paymentRequired: Bool?
+    let clientSecret: String?
     let amountCents: Int
     let discountCents: Int
     let currency: String

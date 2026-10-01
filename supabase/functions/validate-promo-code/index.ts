@@ -36,7 +36,7 @@ Deno.serve(async (req) => {
     // ----------------------------------------------------------------
     const { data: promo, error: promoError } = await supabase
       .from("zz_promo_codes")
-      .select("id, code, discount_type, discount_value, applicable_sizes, excludes_special_pricing, max_redemptions, per_user_limit, starts_at, expires_at, is_active")
+      .select("id, code, discount_type, discount_value, applicable_sizes, excludes_special_pricing, max_redemptions, per_user_limit, starts_at, expires_at, is_active, is_free, restricted, allowed_email_domains")
       .ilike("code", code.trim())
       .maybeSingle();
 
@@ -45,6 +45,13 @@ Deno.serve(async (req) => {
       return json({ error: "lookup_failed", detail: promoError.message }, 500);
     }
     if (!promo) return json({ valid: false, reason: "not_found" });
+
+    // Restricted codes: only accounts on the allow-list may use them. A
+    // caller who isn't gets the same "not_found" as a nonexistent code so
+    // the code's existence can't be probed.
+    if (promo.restricted && !(await isAllowedForRestrictedPromo(supabase, promo, user))) {
+      return json({ valid: false, reason: "not_found" });
+    }
     if (!promo.is_active) return json({ valid: false, reason: "inactive" });
 
     const now = new Date();
@@ -104,7 +111,11 @@ Deno.serve(async (req) => {
       return json({ valid: false, reason: "not_applicable_to_special_price" });
     }
 
-    const discount = computeDiscountCents(promo.discount_type, promo.discount_value, pricing.amount_cents);
+    // A free code takes the whole price (no 50-cent Stripe floor — the
+    // order never touches Stripe); see migration 043.
+    const discount = promo.is_free
+      ? pricing.amount_cents
+      : computeDiscountCents(promo.discount_type, promo.discount_value, pricing.amount_cents);
 
     return json({
       valid: true,
@@ -139,6 +150,47 @@ function computeDiscountCents(discountType: string, discountValue: number, amoun
     raw = discountValue;
   }
   return Math.max(0, Math.min(raw, amountCents - MIN_CHARGE_CENTS));
+}
+
+// Restricted promo codes (see migrations 043/044/045): the caller must have a
+// VERIFIED email (Supabase's email_confirmed_at — the app's send_unlocked flag
+// lives in user_metadata, which the user can write to themselves, so it is NOT
+// proof) AND be allowed: on the allow-list by user id, on it by email, or at
+// an allowed email domain (the domain itself or a subdomain of it).
+async function isAllowedForRestrictedPromo(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  promo: { id: string; allowed_email_domains?: string[] | null },
+  user: { id: string; email?: string | null; email_confirmed_at?: string | null },
+): Promise<boolean> {
+  if (!user.email_confirmed_at) return false;
+
+  const { data: byId } = await supabase
+    .from("zz_promo_code_allowed_users")
+    .select("id")
+    .eq("promo_code_id", promo.id)
+    .eq("user_id", user.id)
+    .limit(1);
+  if (byId && byId.length > 0) return true;
+
+  if (!user.email) return false;
+  const email = user.email.toLowerCase();
+
+  const domain = email.slice(email.lastIndexOf("@") + 1);
+  for (const raw of promo.allowed_email_domains ?? []) {
+    const d = String(raw).toLowerCase();
+    if (domain === d || domain.endsWith("." + d)) return true;
+  }
+
+  // Exact, case-insensitive email match (escape ilike wildcards).
+  const escaped = email.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { data: byEmail } = await supabase
+    .from("zz_promo_code_allowed_users")
+    .select("id")
+    .eq("promo_code_id", promo.id)
+    .ilike("email", escaped)
+    .limit(1);
+  return !!byEmail && byEmail.length > 0;
 }
 
 function json(body: unknown, status = 200): Response {

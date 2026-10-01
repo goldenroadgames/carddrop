@@ -25,7 +25,7 @@ We use the information we collect to:
 - Send you service-related communications (e.g., order confirmations, delivery status);
 - Maintain and improve the Service, including diagnosing technical issues;
 - Comply with legal obligations and enforce our Terms of Service;
-- With your consent as described in Section 5 below, feature the visual design of cards you create in our own marketing and promotional materials.
+- With your consent as described in Section 5 below, feature the visual design of cards you create, and the original photos they started from, in our own marketing and promotional materials.
 
 We do not sell your personal information, and we do not use it for third-party advertising or profiling.
 
@@ -46,10 +46,9 @@ When you share a digital card via text message, email, or a direct link, the Ser
 
 ## 5. Marketing Use of Card Designs
 
-We may select certain cards created through the Service — their photos, artwork, message text, and layout — to feature in our own marketing and promotional materials, such as our website, app store listings, social media, and advertising. We do not include recipient mailing addresses, phone numbers, or email addresses in any marketing material, and we do not use this feature to sell your data to third parties.
+We may select certain cards created through the Service — their photos (including the original photo you uploaded before editing it), artwork, message text, and layout — to feature in our own marketing and promotional materials, such as our website, app store listings, social media, advertising, and example galleries shown inside the app (including side-by-side "before and after" comparisons of your original photo and your finished card). We do not include recipient mailing addresses, phone numbers, or email addresses in any marketing material, and we do not use this feature to sell your data to third parties.
 
-- **If you use the Service without creating an account (anonymous use):** cards you create may be selected for this purpose. Because we have no account tied to anonymous use, there is no opt-out available for cards created this way.
-- **If you create an account:** this feature is enabled by default, and you can turn it off at any time in Settings. Turning it off stops us from selecting any new cards of yours going forward. It does not affect cards we already selected before you turned it off — once a card has been selected for marketing use, it remains available to us for that purpose even if you later opt out or delete the underlying card from your account.
+- Registered users can opt out at any time in Settings. When you opt out, we will not select cards from your account from that date forward; we may continue to feature cards we featured before that date.
 - Selecting a card for this purpose is a separate step from actually publishing it — a selected card may sit in an internal pool before (or without ever) appearing in a specific campaign.
 
 ## 6. Data Retention

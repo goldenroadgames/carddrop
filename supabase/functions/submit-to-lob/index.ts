@@ -143,6 +143,12 @@ Deno.serve(async (req) => {
           cancelError = cancelResult?.error?.message ?? "cancel failed";
         }
       }
+      // A free (promo) order has no PaymentIntent and recorded its promo
+      // redemption up front — release that slot so a failed attempt doesn't
+      // burn a limited code (see create-postcard-payment-intent).
+      if (!order.stripe_payment_intent_id) {
+        await supabase.from("promo_code_redemptions").delete().eq("order_id", order.id);
+      }
       const lobMessage = lobResult?.error?.message ?? "LOB submission failed";
       await supabase
         .from("physical_orders")
@@ -164,15 +170,18 @@ Deno.serve(async (req) => {
     // LOB and can't be un-submitted, so we log it for manual follow-up
     // rather than blocking the order from completing.
     // ----------------------------------------------------------------
-    const captureResponse = await fetch(
-      `https://api.stripe.com/v1/payment_intents/${order.stripe_payment_intent_id}/capture`,
-      { method: "POST", headers: { "Authorization": "Basic " + btoa(`${stripeKey}:`) } }
-    );
+    // Free (promo) orders have no PaymentIntent — nothing to capture.
     let captureError: string | null = null;
-    if (!captureResponse.ok) {
-      const captureResult = await captureResponse.json();
-      console.error("Stripe capture error:", captureResult);
-      captureError = captureResult?.error?.message ?? "capture failed";
+    if (order.stripe_payment_intent_id) {
+      const captureResponse = await fetch(
+        `https://api.stripe.com/v1/payment_intents/${order.stripe_payment_intent_id}/capture`,
+        { method: "POST", headers: { "Authorization": "Basic " + btoa(`${stripeKey}:`) } }
+      );
+      if (!captureResponse.ok) {
+        const captureResult = await captureResponse.json();
+        console.error("Stripe capture error:", captureResult);
+        captureError = captureResult?.error?.message ?? "capture failed";
+      }
     }
 
     // ----------------------------------------------------------------
