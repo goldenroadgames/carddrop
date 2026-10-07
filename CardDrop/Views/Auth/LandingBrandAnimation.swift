@@ -216,7 +216,7 @@ struct LandingBrandAnimation<Controls: View>: View {
                     // Sub-group that gets the extra post-home overshoot —
                     // the sign-in controls below are NOT part of this.
                     VStack(spacing: 0) {
-                        VStack(spacing: 8) {
+                        VStack(spacing: 12) {
                             HStack(alignment: .top, spacing: 0) {
                                 Text("Card")
                                     .font(wordmarkFont)
@@ -236,8 +236,8 @@ struct LandingBrandAnimation<Controls: View>: View {
                                 }
                             )
 
-                            Text("On. The. FRIDGE.")
-                                .font(.system(size: Layout.taglineBaseFontSize, weight: .bold))
+                            Text("On.The.\(Text("FRIDGE.").fontWeight(.bold))")
+                                .font(.system(size: Layout.taglineBaseFontSize, weight: .medium))
                                 .foregroundColor(.brandBlue)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.01)

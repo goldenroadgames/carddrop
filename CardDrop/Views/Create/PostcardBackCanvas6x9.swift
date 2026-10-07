@@ -352,13 +352,8 @@ private struct BrandingBand6x9: View {
                 .background(Color.clear)
                 .padding(.top, -10)
 
-                HStack(spacing: 14) {
-                    Text("On.")
-                    Text("The.")
-                    Text("FRIDGE.")
-                        .padding(.leading, 6)
-                }
-                .font(.system(size: onTheSize, weight: .bold))
+                Text("On.The.\(Text("FRIDGE.").fontWeight(.bold))")
+                .font(.system(size: onTheSize, weight: .medium))
                 .foregroundColor(.white)
                 .padding(.top, lineGap)
             }

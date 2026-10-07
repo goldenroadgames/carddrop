@@ -360,7 +360,7 @@ private struct BrandingBand: View {
         let localX: CGFloat = width - borderWidth - qrTotal
         let localY: CGFloat = borderWidth
 
-        // CardDrop / "On. The. FRIDGE." font sizes, with a fixed gap between them.
+        // CardDrop / "On.The.FRIDGE." font sizes, with a fixed gap between them.
         let wordmarkSize: CGFloat = 132
         let onTheSize:    CGFloat = 72
         let lineGap:      CGFloat = 36
@@ -399,20 +399,8 @@ private struct BrandingBand: View {
                 .background(Color.clear)
                 .padding(.top, -10)
 
-                // Individual words in an HStack with an explicit gap, rather
-                // than a single string's space characters — a plain space
-                // renders at an uneven visual width depending on the
-                // adjacent letterforms (e.g. "The." into "FRIDGE." reads
-                // tighter than "On." into "The." even with identical space
-                // characters), so this is the only way to guarantee the
-                // gaps actually look equal.
-                HStack(spacing: 14) {
-                    Text("On.")
-                    Text("The.")
-                    Text("FRIDGE.")
-                        .padding(.leading, 6)
-                }
-                .font(.system(size: onTheSize, weight: .bold))
+                Text("On.The.\(Text("FRIDGE.").fontWeight(.bold))")
+                .font(.system(size: onTheSize, weight: .medium))
                 .foregroundColor(.white)
                 .padding(.top, lineGap)
             }
