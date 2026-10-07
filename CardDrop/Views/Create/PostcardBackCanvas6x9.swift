@@ -67,37 +67,9 @@ struct PostcardBackCanvas6x9: View {
         // (saved 2026-09-09 for SCRIPT, 2026-09-25 for PRINT) and were never
         // reconciled to share one band-position formula, so this keeps each
         // exactly as it was measured rather than guessing they're equivalent.
-        let bandOffsetX: CGFloat = draft.messageFont == .print
-            ? noInkLeft + noInkWidth - 40 - bandW
-            : bandX
-        let bandOffsetY: CGFloat = draft.messageFont == .print ? 970 : bandY
-
-        // Message-area polygon — three zones, same shape as the 4x6 back's:
-        // the band is narrower than the no-ink zone here, so the obstacle
-        // column narrows twice (once to clear the band, again to clear the
-        // wider no-ink zone below it) rather than the single step a
-        // flush-matching band+zone width would allow.
-        //
-        // All values here are hardcoded (not derived from noInkLeft/noInkTop/
-        // messageAreaMaxY-as-formula/etc.) so fine-tuning the polygon can't
-        // silently shift if the border width or LOB ink-free-zone fractions
-        // above ever change — those still drive the real ink-free content
-        // zone (`noInkLeft`/`noInkTop` below), which is intentionally kept
-        // separate from this polygon's own obstacle edges.
-        //
-        // Two independently-tuned sets, one per font (see bandOffsetX/Y
-        // comment above for why they're not derived from one shared formula).
-        let messageAreaLeftX: CGFloat = 160
-        let messageAreaTopY:  CGFloat = draft.messageFont == .print ? 113  : 143
-        let messageAreaMaxX:  CGFloat = 3910
-        let messageAreaMaxY:  CGFloat = draft.messageFont == .print ? 2616 : 2646
-        let messagePolygonNoInkTop:  CGFloat = draft.messageFont == .print ? 1595 : 1625
-        let messagePolygonNoInkLeft: CGFloat = 2200
-        let messageZones: [MessageZone6x9] = [
-            MessageZone6x9(yStart: messageAreaTopY, yEnd: bandY + 3,     right: messageAreaMaxX),
-            MessageZone6x9(yStart: bandY + 3,           yEnd: messagePolygonNoInkTop + 3,  right: bandOffsetX - 40),
-            MessageZone6x9(yStart: messagePolygonNoInkTop + 3, yEnd: messageAreaMaxY, right: messagePolygonNoInkLeft)
-        ]
+        let geometry = MessagePolygon.sixByNine(font: draft.messageFont, size: size)
+        let bandOffsetX = geometry.bandOffsetX
+        let bandOffsetY = geometry.bandOffsetY
 
         ZStack(alignment: .topLeading) {
             Color.white
@@ -112,12 +84,7 @@ struct PostcardBackCanvas6x9: View {
             if !message.isEmpty {
                 MessagePolygonLabel6x9(
                     text: message,
-                    boundingWidth: messageAreaMaxX,
-                    boundingHeight: messageAreaMaxY,
-                    leftX: messageAreaLeftX,
-                    topY: messageAreaTopY,
-                    maxY: messageAreaMaxY,
-                    zones: messageZones,
+                    polygon: geometry.polygon,
                     fontStyle: draft.messageFont
                 )
             }
@@ -267,119 +234,25 @@ private struct InkTextCanvasLabel6x9: View {
 // (not hardcoded constants like the 4x6 back's), since the band's position
 // is itself derived from the no-ink zone rather than a fixed value.
 
-private struct MessageZone6x9 {
-    let yStart: CGFloat
-    let yEnd: CGFloat
-    let right: CGFloat
-}
-
 private struct MessagePolygonLabel6x9: View {
     let text: String
-    let boundingWidth: CGFloat
-    let boundingHeight: CGFloat
-    // Left edge is constant across all zones, so the polygon only steps on
-    // the right edge.
-    let leftX: CGFloat
-    let topY: CGFloat
-    // Core Text's own coordinate space is bottom-up (y increases upward), so
-    // vertices are authored as (x, maxY - topDownY) — flipping the path
-    // itself, not just the CGContext at draw time.
-    let maxY: CGFloat
-    let zones: [MessageZone6x9]
+    let polygon: MessagePolygon
     let fontStyle: CardbackMessageFont
-
-    // PRINT is the current (2026-09-25) tuning; SCRIPT is what was live on
-    // 2026-09-09 before the switch to PRINT — see PostcardBackCanvas.swift's
-    // MessagePolygonLabel for the 4x6 equivalent.
-    private var fontSize: CGFloat {
-        switch fontStyle {
-        case .print:  return 154
-        case .script: return 176
-        }
-    }
-    private var lineHeight: CGFloat {
-        switch fontStyle {
-        case .print:  return 164
-        case .script: return 179
-        }
-    }
-    private let startIndent: CGFloat = 50
-    private let inkColor = UIColor(red: 0.11, green: 0.24, blue: 0.45, alpha: 1)
-
-    private func path(from startTopY: CGFloat) -> CGPath {
-        func pt(_ x: CGFloat, _ topDownY: CGFloat) -> CGPoint {
-            CGPoint(x: x, y: maxY - topDownY)
-        }
-        let p = CGMutablePath()
-        p.move(to: pt(leftX, startTopY))
-        var lastZoneEnd = startTopY
-        for zone in zones where zone.yEnd > startTopY {
-            let top = max(zone.yStart, startTopY)
-            p.addLine(to: pt(zone.right, top))
-            p.addLine(to: pt(zone.right, zone.yEnd))
-            lastZoneEnd = zone.yEnd
-        }
-        p.addLine(to: pt(leftX, lastZoneEnd))
-        p.closeSubpath()
-        return p
-    }
 
     var body: some View {
         Canvas { context, _ in
-            let font = UIFont(name: fontStyle.uiFontName, size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-
-            // Start at a fixed position (line 2's slot, still inside the
-            // wide Zone A), indented, instead of the very top, so typing
-            // always begins in the same spot rather than jumping around
-            // based on message length. Only fall back to the full
-            // top-anchored area (no indent) for the rare very-long message
-            // that wouldn't otherwise fit, so nothing ever gets clipped.
-            let startStyle = NSMutableParagraphStyle()
-            startStyle.minimumLineHeight = lineHeight
-            startStyle.maximumLineHeight = lineHeight
-            startStyle.firstLineHeadIndent = startIndent
-            let startAttrStr = NSAttributedString(
-                string: text,
-                attributes: [
-                    .font: font,
-                    .foregroundColor: inkColor,
-                    .paragraphStyle: startStyle
-                ]
-            )
-            let startFramesetter = CTFramesetterCreateWithAttributedString(startAttrStr)
-            let startY = topY + lineHeight
-            let startPath = path(from: startY)
-            let startFrame = CTFramesetterCreateFrame(startFramesetter, CFRangeMake(0, 0), startPath, nil)
-            let visible = CTFrameGetVisibleStringRange(startFrame)
-            let ctFrame: CTFrame
-            if visible.length >= (startAttrStr.string as NSString).length {
-                ctFrame = startFrame
-            } else {
-                let fallbackStyle = NSMutableParagraphStyle()
-                fallbackStyle.minimumLineHeight = lineHeight
-                fallbackStyle.maximumLineHeight = lineHeight
-                let fallbackAttrStr = NSAttributedString(
-                    string: text,
-                    attributes: [
-                        .font: font,
-                        .foregroundColor: inkColor,
-                        .paragraphStyle: fallbackStyle
-                    ]
-                )
-                let fallbackFramesetter = CTFramesetterCreateWithAttributedString(fallbackAttrStr)
-                ctFrame = CTFramesetterCreateFrame(fallbackFramesetter, CFRangeMake(0, 0), path(from: topY), nil)
-            }
+            let ctFrame = MessageLayout.layout(text: text, polygon: polygon, fontStyle: fontStyle).frame
 
             context.withCGContext { cgContext in
                 cgContext.saveGState()
                 cgContext.textMatrix = .identity
-                cgContext.translateBy(x: 0, y: boundingHeight)
+                cgContext.translateBy(x: 0, y: polygon.maxY)
                 cgContext.scaleBy(x: 1, y: -1)
                 CTFrameDraw(ctFrame, cgContext)
                 cgContext.restoreGState()
             }
         }
-        .frame(width: boundingWidth, height: boundingHeight)
+        .frame(width: polygon.maxX, height: polygon.maxY)
     }
 }
 

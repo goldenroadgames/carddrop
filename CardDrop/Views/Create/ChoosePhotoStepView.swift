@@ -134,7 +134,8 @@ struct ChoosePhotoStepView: View {
                 VStack(spacing: 4) {
                     SlidingTogglePill(
                         options: [(PostcardOrientation.landscape, "Landscape"), (.portrait, "Portrait")],
-                        selection: draft.orientation
+                        selection: draft.orientation,
+                        weight: .semibold
                     ) { option in
                         draft.orientation = option
                         draft.imageScale = 1.0
@@ -144,7 +145,8 @@ struct ChoosePhotoStepView: View {
 
                     SlidingTogglePill(
                         options: [(PostcardBorder.fullBleed, "Borderless"), (.whiteBorder, "Classic")],
-                        selection: draft.border
+                        selection: draft.border,
+                        weight: .semibold
                     ) { option in
                         draft.border = option
                         rerenderComposedImage()
@@ -224,6 +226,7 @@ struct ChoosePhotoStepView: View {
         }
         .sheet(isPresented: $showGetInspired) {
             InspireGalleryView()
+                .presentationBackground(Color(.systemBackground))
         }
         .alert("Photo May Print Blurry", isPresented: $showLowResAlert) {
             Button("Use Anyway") {
@@ -294,7 +297,7 @@ struct ChoosePhotoStepView: View {
             VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Text("Pinch to zoom · Drag to reposition")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.brandBlue)
                 Button {
                     print("🔵 Undo tapped — before: scale=\(draft.imageScale) offset=\(draft.imageOffset)")
@@ -407,7 +410,7 @@ struct ChoosePhotoStepView: View {
             Button("Choose a Different Photo") {
                 isPickerPresented = true
             }
-            .font(.system(size: 15, weight: .regular))
+            .font(.system(size: 15, weight: .semibold))
             .padding(.top, 6)
             .padding(.bottom, 4)
             .contentShape(Rectangle())
@@ -424,7 +427,7 @@ struct ChoosePhotoStepView: View {
             HStack(alignment: .center, spacing: 12) {
                 HStack(spacing: 6) {
                     Text("To")
-                        .font(.system(size: 15, weight: .regular))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.brandBlue)
                     Button {
                         showToContactPicker = true
@@ -442,7 +445,7 @@ struct ChoosePhotoStepView: View {
 
                 HStack(spacing: 6) {
                     Text("From")
-                        .font(.system(size: 15, weight: .regular))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.brandBlue)
                     TextField("e.g. Pookie", text: $draft.senderNickname)
                         .textFieldStyle(.roundedBorder)
@@ -460,7 +463,7 @@ struct ChoosePhotoStepView: View {
 
             if usedContactPickerForTo {
                 Text("Edit to use a different nickname, sunshine")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.brandBlue)
                     .padding(.leading, 8)
             }
@@ -629,7 +632,7 @@ struct ChoosePhotoStepView: View {
                     .font(.system(size: 60))
                     .foregroundColor(.secondary)
                 Text("Choose a photo for your card")
-                    .font(.subheadline)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
@@ -748,6 +751,7 @@ struct ChoosePhotoStepView: View {
 struct SlidingTogglePill<T: Hashable>: View {
     let options: [(value: T, label: String)]
     let selection: T
+    var weight: Font.Weight = .regular
     let onSelect: (T) -> Void
 
     @EnvironmentObject private var appSettings: AppSettings
@@ -757,7 +761,7 @@ struct SlidingTogglePill<T: Hashable>: View {
         HStack(spacing: 0) {
             ForEach(options, id: \.value) { option in
                 Text(option.label)
-                    .font(.system(size: 17, weight: .regular))
+                    .font(.system(size: 17, weight: weight))
                     .foregroundColor(selection == option.value ? theme.textOnAccent : .primary)
                     .padding(.vertical, 4)
                     .frame(maxWidth: .infinity)

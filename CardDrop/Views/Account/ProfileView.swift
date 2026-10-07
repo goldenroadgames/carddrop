@@ -217,7 +217,7 @@ struct ProfileView: View {
             NavigationLink {
                 MailingAddressBookView()
             } label: {
-                Label("Mailing Addresses", systemImage: "envelope.fill")
+                Label("Saved Addresses", systemImage: "envelope.fill")
             }
         } footer: {
             Text("Saved, verified addresses for mailing real postcards.")

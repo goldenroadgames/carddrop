@@ -65,8 +65,7 @@ struct PostcardBackCanvas: View {
             if !message.isEmpty {
                 MessagePolygonLabel(
                     text: message,
-                    boundingWidth: messageAreaMaxX,
-                    boundingHeight: messageAreaMaxY,
+                    polygon: .fourBySix(font: draft.messageFont),
                     fontStyle: draft.messageFont
                 )
             }
@@ -264,140 +263,27 @@ private struct InkTextCanvasLabel: View {
 //   Zone A: x 98–2570, y 58–675    (wide open, no top obstacle anymore)
 //   Zone C: x 98–1170, y 675–1142  (narrows to clear the branding band)
 
-private let messageAreaMaxX: CGFloat = 2570
-private let messageAreaMaxY: CGFloat = 1142
-private let messageAreaTopY: CGFloat = 58
-private let messageAreaLeftX: CGFloat = 98
-
-private struct MessageZone {
-    let yStart: CGFloat
-    let yEnd: CGFloat
-    let right: CGFloat
-}
-
-// Left edge is a constant messageAreaLeftX across all zones, so the polygon
-// only steps on the right edge (the no-ink-zone notch) — see
-// PostcardBackCanvas.swift header comment for the zone breakdown.
-private let messageZones: [MessageZone] = [
-    MessageZone(yStart: 58,  yEnd: 675,  right: 2570),
-    MessageZone(yStart: 675, yEnd: 1142, right: 1170)
-]
-
-// Builds the message-area polygon starting from `topY` instead of the full
-// area's top (messageAreaTopY) — used to vertically center short messages
-// by trimming off unused top space while keeping each remaining zone's own
-// width (rather than just shifting the drawn text down, which would apply
-// the wrong zone's width and risk overlapping the QR/band notches).
-private func messageAreaPath(topY: CGFloat = messageAreaTopY) -> CGPath {
-    // Core Text's own coordinate space is bottom-up (y increases upward),
-    // so vertices are authored here as (x, maxY - topDownY) — flipping the
-    // path itself, not just the CGContext at draw time — so Core Text's
-    // internal notion of "top" lines up with zone A instead of zone C.
-    func pt(_ x: CGFloat, _ topDownY: CGFloat) -> CGPoint {
-        CGPoint(x: x, y: messageAreaMaxY - topDownY)
-    }
-
-    let p = CGMutablePath()
-    p.move(to: pt(messageAreaLeftX, topY))
-    var lastZoneEnd = topY
-    for zone in messageZones where zone.yEnd > topY {
-        let top = max(zone.yStart, topY)
-        p.addLine(to: pt(zone.right, top))
-        p.addLine(to: pt(zone.right, zone.yEnd))
-        lastZoneEnd = zone.yEnd
-    }
-    p.addLine(to: pt(messageAreaLeftX, lastZoneEnd))
-    p.closeSubpath()
-    return p
-}
-
 // MARK: - Message label
 
 private struct MessagePolygonLabel: View {
     let text: String
-    let boundingWidth: CGFloat
-    let boundingHeight: CGFloat
+    let polygon: MessagePolygon
     let fontStyle: CardbackMessageFont
-
-    // Tuned per font — a script face needs different sizing/spacing than a
-    // print face to read well at the same nominal weight. Values are the
-    // ones saved in git for each: PRINT is the current (2026-09-25) tuning,
-    // SCRIPT is what was live on 2026-09-09 before the switch to PRINT.
-    private var fontSize: CGFloat {
-        switch fontStyle {
-        case .print:  return 84
-        case .script: return 98
-        }
-    }
-    private var lineHeight: CGFloat {
-        switch fontStyle {
-        case .print:  return 86
-        case .script: return 97
-        }
-    }
-
-    private let startIndent: CGFloat = 50
-
-    // Bic Cristal ballpoint blue — muted navy, not a bright/saturated blue.
-    private let inkColor = UIColor(red: 0.11, green: 0.24, blue: 0.45, alpha: 1)
 
     var body: some View {
         Canvas { context, _ in
-            let font = UIFont(name: fontStyle.uiFontName, size: fontSize) ?? UIFont.systemFont(ofSize: fontSize)
-
-            // Start at a fixed position (line 2's slot, still inside the
-            // wide Zone A), indented, instead of the very top, so typing
-            // always begins in the same spot rather than jumping around
-            // based on message length. Only fall back to the full
-            // top-anchored area (no indent, like line 1 always has) — for
-            // the rare very-long message that wouldn't otherwise fit — so
-            // nothing ever gets clipped.
-            let startStyle = NSMutableParagraphStyle()
-            startStyle.minimumLineHeight = lineHeight
-            startStyle.maximumLineHeight = lineHeight
-            startStyle.firstLineHeadIndent = startIndent
-            let startAttrStr = NSAttributedString(
-                string: text,
-                attributes: [
-                    .font: font,
-                    .foregroundColor: inkColor,
-                    .paragraphStyle: startStyle
-                ]
-            )
-            let startFramesetter = CTFramesetterCreateWithAttributedString(startAttrStr)
-            let startY = messageAreaTopY + lineHeight
-            let startPath = messageAreaPath(topY: startY)
-            let startFrame = CTFramesetterCreateFrame(startFramesetter, CFRangeMake(0, 0), startPath, nil)
-            let visible = CTFrameGetVisibleStringRange(startFrame)
-            let ctFrame: CTFrame
-            if visible.length >= (startAttrStr.string as NSString).length {
-                ctFrame = startFrame
-            } else {
-                let fallbackStyle = NSMutableParagraphStyle()
-                fallbackStyle.minimumLineHeight = lineHeight
-                fallbackStyle.maximumLineHeight = lineHeight
-                let fallbackAttrStr = NSAttributedString(
-                    string: text,
-                    attributes: [
-                        .font: font,
-                        .foregroundColor: inkColor,
-                        .paragraphStyle: fallbackStyle
-                    ]
-                )
-                let fallbackFramesetter = CTFramesetterCreateWithAttributedString(fallbackAttrStr)
-                ctFrame = CTFramesetterCreateFrame(fallbackFramesetter, CFRangeMake(0, 0), messageAreaPath(), nil)
-            }
+            let ctFrame = MessageLayout.layout(text: text, polygon: polygon, fontStyle: fontStyle).frame
 
             context.withCGContext { cgContext in
                 cgContext.saveGState()
                 cgContext.textMatrix = .identity
-                cgContext.translateBy(x: 0, y: boundingHeight)
+                cgContext.translateBy(x: 0, y: polygon.maxY)
                 cgContext.scaleBy(x: 1, y: -1)
                 CTFrameDraw(ctFrame, cgContext)
                 cgContext.restoreGState()
             }
         }
-        .frame(width: boundingWidth, height: boundingHeight)
+        .frame(width: polygon.maxX, height: polygon.maxY)
     }
 }
 

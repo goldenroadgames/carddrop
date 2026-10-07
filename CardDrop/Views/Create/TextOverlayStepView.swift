@@ -18,21 +18,18 @@ private func firstAvailableSymbol(_ names: String...) -> String {
     names.first { UIImage(systemName: $0) != nil } ?? names.last!
 }
 
-// The "Done" pill from the Caption edit panel, as one shared style so the
-// panel's Done and the add-sheet's Cancel/Add are literally the same code and
-// can't drift apart.
-private struct DonePillButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            // Fixed point size (not a text style), so it can't scale with
-            // Dynamic Type differently in a sheet vs. the main screen.
-            .font(.system(size: 15, weight: .semibold))
+// The "Save" pill, exactly as the Greetings edit panel has always drawn it
+// (apply it to a plain Button): shared so all the edit panels and quick sheets
+// use literally the same code and can't drift apart.
+extension View {
+    func savePill() -> some View {
+        self
+            .font(.subheadline.weight(.semibold))
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(Color.accentColor)
             .foregroundColor(.white)
             .cornerRadius(999)
-            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
@@ -58,23 +55,73 @@ private struct CaptionColorPreset: Identifiable {
     ]
 }
 
+extension CaptionColorPreset {
+    // The preset whose font + background match this caption's colors, or nil if
+    // they were customized (in the full panel). Compared as RGBA with a small
+    // tolerance since SwiftUI Color's == isn't reliable across color spaces.
+    static func matching(font: Color, background: Color) -> CaptionColorPreset? {
+        func rgba(_ c: Color) -> [CGFloat] {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            UIColor(c).getRed(&r, green: &g, blue: &b, alpha: &a)
+            return [r, g, b, a]
+        }
+        func same(_ x: Color, _ y: Color) -> Bool {
+            zip(rgba(x), rgba(y)).allSatisfy { abs($0 - $1) < 0.01 }
+        }
+        return all.first { same($0.font, font) && same($0.background, background) }
+    }
+}
+
+// What the Caption sheet does to an EXISTING caption when opened from a tap on
+// the card: each control edits the caption live, and Delete removes it.
+private struct CaptionEditActions {
+    let setText: (String) -> Void
+    let setStyle: (TextBgStyle) -> Void
+    let setColors: (CaptionColorPreset) -> Void
+    let delete: () -> Void
+}
+
 // Small sheet shown when Caption is tapped: enter the phrase (may be left
-// blank), pick a container style and a color preset, then Add creates the
-// overlay. The full edit panel is unchanged and opens when the caption is
-// tapped on the card.
+// blank), pick a container style and a color preset, then Save creates the
+// overlay (the trash icon closes without adding one). "More fonts
+// and colors" adds it and opens the full edit panel. Tapping an existing caption
+// on the card opens this same sheet in edit mode (`edit` set): changes apply
+// live and the trash icon deletes the caption.
 private struct CaptionQuickAddSheet: View {
+    let edit: CaptionEditActions?
     let onAdd: (String, TextBgStyle, CaptionColorPreset) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
-    @State private var style: TextBgStyle = .speech
-    @State private var colors = CaptionColorPreset.all[0]
+    // New: add the caption, then open the full panel. Edit: just open the panel.
+    let onMore: (String, TextBgStyle, CaptionColorPreset) -> Void
+    let onClose: () -> Void   // hides the panel (the step owns the show flag)
+    @State private var text: String
+    @State private var style: TextBgStyle
+    // nil = an existing caption whose colors don't match any preset.
+    @State private var colors: CaptionColorPreset?
+
+    init(edit: CaptionEditActions? = nil,
+         initialText: String = "",
+         initialStyle: TextBgStyle = .speech,
+         initialColors: CaptionColorPreset? = CaptionColorPreset.all[0],
+         onAdd: @escaping (String, TextBgStyle, CaptionColorPreset) -> Void,
+         onMore: @escaping (String, TextBgStyle, CaptionColorPreset) -> Void,
+         onClose: @escaping () -> Void) {
+        self.onClose = onClose
+        self.edit = edit
+        self.onAdd = onAdd
+        self.onMore = onMore
+        _text = State(initialValue: initialText)
+        _style = State(initialValue: initialStyle)
+        _colors = State(initialValue: initialColors)
+    }
     @FocusState private var textFocused: Bool
     private let charLimit = 40
     private let styleOrder = TextBgStyle.displayOrder
+    private let labelGap: CGFloat = 6       // label → its control (was 16)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Enter Caption")
+            VStack(alignment: .leading, spacing: labelGap) {
+            Text(edit == nil ? "Enter Caption" : "Caption")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(.brandBlue)
             // Vertical axis: wraps, and Return inserts a line break. Reserves
@@ -85,14 +132,17 @@ private struct CaptionQuickAddSheet: View {
                 .focused($textFocused)
                 .onChange(of: text) { _, new in
                     if new.count > charLimit { text = String(new.prefix(charLimit)) }
+                    edit?.setText(text)
                 }
+            }
 
+            VStack(alignment: .leading, spacing: labelGap) {
             Text("Style")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(.brandBlue)
             HStack(spacing: 8) {
                 ForEach(styleOrder, id: \.self) { s in
-                    Button(action: { style = s }) {
+                    Button(action: { style = s; edit?.setStyle(s) }) {
                         Image(systemName: s.systemImage)
                             .font(.system(size: 18))
                             .accessibilityLabel(s.displayName)
@@ -105,7 +155,9 @@ private struct CaptionQuickAddSheet: View {
                     .buttonStyle(.plain)
                 }
             }
+            }
 
+            VStack(alignment: .leading, spacing: labelGap) {
             Text("Color")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(.brandBlue)
@@ -113,7 +165,7 @@ private struct CaptionQuickAddSheet: View {
             // "A" in its font color.
             HStack(spacing: 8) {
                 ForEach(CaptionColorPreset.all) { preset in
-                    Button(action: { colors = preset }) {
+                    Button(action: { colors = preset; edit?.setColors(preset) }) {
                         Text("A")
                             .font(.system(size: 18, weight: .bold))
                             .foregroundColor(preset.font)
@@ -132,36 +184,49 @@ private struct CaptionQuickAddSheet: View {
                                 Circle()
                                     .stroke(Color.accentColor, lineWidth: 2.5)
                                     .padding(-3)
-                                    .opacity(colors.id == preset.id ? 1 : 0)
+                                    .opacity(colors?.id == preset.id ? 1 : 0)
                             )
                     }
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity)
                 }
             }
+            .padding(.top, 3)
+            }
 
-            Spacer(minLength: 0)   // pushes Cancel/Add to the bottom of the sheet
-
-            HStack {
-                // Same pill as the "Done" button in the full caption panel.
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(DonePillButtonStyle())
-                Spacer()
-                Button("Add") {
-                    onAdd(text, style, colors)
-                    dismiss()
+            // Same order as the full panels' last row: Save, trash.
+            HStack(spacing: 8) {
+                // Same pill as the "Save" button in the full caption panel.
+                Button("Save") {
+                    // Edit mode has already applied every change live.
+                    if edit == nil { onAdd(text, style, colors ?? CaptionColorPreset.all[0]) }
+                    onClose()
                 }
-                .buttonStyle(DonePillButtonStyle())
+                .savePill()
+                // Same trash button as the full edit panels. On a new caption
+                // (nothing added yet) it just closes without adding one.
+                Button(action: { edit?.delete(); onClose() }) {
+                    Image(systemName: "trash").foregroundColor(.red)
+                }
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+                Spacer()
+                Button("More fonts and colors") {
+                    onMore(text, style, colors ?? CaptionColorPreset.all[0])
+                    onClose()
+                }
+                .font(.subheadline.weight(.semibold))   // same as the Save pill
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 40)
-        .padding(.top, 20)
-        // CardDropApp pins the whole app to .large, but a sheet doesn't pick that
-        // up, so on a device with larger system text the sheet's text-style fonts
-        // (the Cancel/Add pills) rendered bigger than the same pill in the main UI.
-        .dynamicTypeSize(.large)
-        .onAppear { textFocused = true }
+        // Same padding + opaque background as the full edit panels; the step's
+        // bottom overlay supplies the material, corners, margins and shadow.
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
+        // Edit mode doesn't auto-focus: the keyboard would cover the card.
+        .onAppear { textFocused = edit == nil }
     }
 }
 
@@ -179,7 +244,12 @@ private struct GreetingsQuickAddSheet: View {
     let initialColor: GreetingsBadgeColor
     let onChange: (String, String, GreetingsFixedPosition, GreetingsBadgeColor) -> Void
     let onAdd: () -> Void
-    @Environment(\.dismiss) private var dismiss
+    // Non-nil = editing the badge already on the card (trash deletes it);
+    // nil = a new badge (trash closes without adding).
+    let onDelete: (() -> Void)?
+    // New: confirms the add and opens the full panel. Edit: just opens the panel.
+    let onMore: () -> Void
+    let onClose: () -> Void   // hides the panel (the step owns the show flag)
     @State private var intro: String
     @State private var marquee: String
     @State private var position: GreetingsFixedPosition
@@ -193,13 +263,19 @@ private struct GreetingsQuickAddSheet: View {
     init(initialIntro: String, initialMarquee: String, initialPosition: GreetingsFixedPosition,
          initialColor: GreetingsBadgeColor,
          onChange: @escaping (String, String, GreetingsFixedPosition, GreetingsBadgeColor) -> Void,
-         onAdd: @escaping () -> Void) {
+         onAdd: @escaping () -> Void,
+         onDelete: (() -> Void)? = nil,
+         onMore: @escaping () -> Void,
+         onClose: @escaping () -> Void) {
+        self.onClose = onClose
         self.initialIntro = initialIntro
         self.initialMarquee = initialMarquee
         self.initialPosition = initialPosition
         self.initialColor = initialColor
         self.onChange = onChange
         self.onAdd = onAdd
+        self.onDelete = onDelete
+        self.onMore = onMore
         _intro = State(initialValue: initialIntro)
         _marquee = State(initialValue: initialMarquee)
         _position = State(initialValue: initialPosition)
@@ -276,23 +352,36 @@ private struct GreetingsQuickAddSheet: View {
                 }
             }
 
-            Spacer(minLength: 0)   // pushes Cancel/Add to the bottom of the sheet
-
-            HStack {
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(DonePillButtonStyle())
-                Spacer()
-                Button("Add") {
+            // Same order as the full panels' last row: Save, trash.
+            HStack(spacing: 8) {
+                Button("Save") {
                     onAdd()
-                    dismiss()
+                    onClose()
                 }
-                .buttonStyle(DonePillButtonStyle())
+                .savePill()
+                // Same trash button as the full edit panels. On a new badge
+                // (not confirmed yet) the sheet closes unconfirmed and the
+                // preview badge is removed.
+                Button(action: { onDelete?(); onClose() }) {
+                    Image(systemName: "trash").foregroundColor(.red)
+                }
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+                Spacer()
+                Button("More fonts and colors") {
+                    onMore()
+                    onClose()
+                }
+                .font(.subheadline.weight(.semibold))   // same as the Save pill
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 40)
-        .padding(.top, 20)
-        .dynamicTypeSize(.large)   // see CaptionQuickAddSheet
+        // Same padding + opaque background as the full edit panels; the step's
+        // bottom overlay supplies the material, corners, margins and shadow.
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(Color(.systemBackground))
         // (No auto-focus here, unlike the Caption sheet: the keyboard would
         // cover the card, and the point is to see the default badge on open.)
         // Live: push every edit to the badge already sitting on the card.
@@ -306,6 +395,8 @@ private struct GreetingsQuickAddSheet: View {
 struct TextOverlayStepView: View {
     @ObservedObject var draft: PostcardDraft
     var onNext: () -> Void
+    // Back to the Photo step (no picker opened) — the "Alter Photo" link.
+    var onAlterPhoto: () -> Void = {}
 
     @EnvironmentObject private var appSettings: AppSettings
 
@@ -319,20 +410,26 @@ struct TextOverlayStepView: View {
     @State private var lastImgSize: CGSize = .zero
     @State private var keyboardHeight: CGFloat = 0
     @State private var isGeneratingSubjectCutout = false
-    // Heights of the two quick-add sheets (their .presentationDetents).
-    private static let captionSheetHeight: CGFloat = 390
-    private static let greetingsSheetHeight: CGFloat = 325
     @State private var showingCaptionSheet = false
     @State private var showingGreetingsSheet = false
     // Live-preview state for the Greetings quick-add sheet: a real badge is put
     // on the card when the sheet opens and edited as the user types. If the
-    // sheet closes without Add, it's removed and the photo/cutout put back.
+    // sheet closes without Save, it's removed and the photo/cutout put back.
     @State private var pendingGreetingsImgSize: CGSize = .zero
     @State private var greetingsPreviewID: UUID?
     @State private var greetingsAddConfirmed = false
     @State private var greetingsRestoreScale: CGFloat = 1
     @State private var greetingsRestoreOffset: CGSize = .zero
     @State private var greetingsStartedCutout = false
+    // Quick sheets reopened on an EXISTING object (tap on the card): which
+    // caption / whether the badge is being edited, what to do once the sheet has
+    // closed ("More options" → select the object so the full panel opens;
+    // Delete → remove the badge).
+    @State private var captionEditID: UUID?
+    @State private var pendingFullCaptionID: UUID?
+    @State private var greetingsEditing = false
+    @State private var greetingsOpenFullPanel = false
+    @State private var greetingsDeleteRequested = false
     // Canvas width captured when the Caption button is tapped, since the sheet's
     // onAdd closure runs after the button row's imgSize is out of scope.
     @State private var pendingCaptionCanvasWidth: CGFloat = 0
@@ -385,10 +482,10 @@ struct TextOverlayStepView: View {
                     // portrait, where height is usually the binding
                     // constraint) — then shrinking it back on Done.
                     Divider()
-                        .opacity(isEditing ? 0 : 1)
+                        .opacity(isCoveringControlsOpen ? 0 : 1)
                     addOverlayButtonsRow(imgSize: lastImgSize)
-                        .opacity(isEditing ? 0 : 1)
-                        .allowsHitTesting(!isEditing)
+                        .opacity(isCoveringControlsOpen ? 0 : 1)
+                        .allowsHitTesting(!isCoveringControlsOpen)
                     Button(action: onNext) {
                         Text("Next: Write Card")
                             .font(.system(size: 17, weight: .semibold))
@@ -398,7 +495,7 @@ struct TextOverlayStepView: View {
                             .foregroundColor(.white)
                             .cornerRadius(999)
                     }
-                    .allowsHitTesting(!isEditing)
+                    .allowsHitTesting(!isCoveringControlsOpen)
                     .padding(.horizontal)
                     .padding(.vertical, 12)
                 }
@@ -413,14 +510,22 @@ struct TextOverlayStepView: View {
         // by `keyboardHeight` so it rises above the keyboard (covering more
         // of the preview underneath) instead of being covered by it.
         .overlay(alignment: .bottom) {
+            // The Caption / Greetings quick panels are the same floating panel
+            // as the full edit panels (identical material, corners, margins,
+            // shadow), shown in the same spot.
             if isEditing {
-                editPanel(imgSize: lastImgSize)
-                    .background(.regularMaterial)
-                    .cornerRadius(12)
-                    .padding(.horizontal, 4)
-                    .padding(.bottom, 2 + keyboardHeight)
-                    .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: -3)
+                editPanelChrome { editPanel(imgSize: lastImgSize) }
+            } else if showingCaptionSheet {
+                editPanelChrome { captionSheetContent() }
+            } else if showingGreetingsSheet {
+                editPanelChrome { greetingsSheetContent() }
             }
+        }
+        .onChange(of: showingCaptionSheet) { was, now in
+            if was && !now { finishCaptionSheet() }
+        }
+        .onChange(of: showingGreetingsSheet) { was, now in
+            if was && !now { finishGreetingsPreview() }
         }
         .animation(.easeInOut(duration: 0.2), value: isEditing)
         .animation(.easeInOut(duration: 0.2), value: showingCaptionSheet)
@@ -474,6 +579,15 @@ struct TextOverlayStepView: View {
         }
     }
 
+    private func editPanelChrome<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .background(.regularMaterial)
+            .cornerRadius(12)
+            .padding(.horizontal, 4)
+            .padding(.bottom, 2 + keyboardHeight)
+            .shadow(color: .black.opacity(0.25), radius: 8, x: 0, y: -3)
+    }
+
     // True while anything is open over the bottom of the screen: the edit panel
     // (caption / Greetings / QR / burst) or one of the quick-add sheets.
     private var isCoveringControlsOpen: Bool {
@@ -498,7 +612,7 @@ struct TextOverlayStepView: View {
                 VStack(spacing: 0) {
                 HStack(spacing: 6) {
                     Text("Pinch to zoom · Drag to reposition")
-                        .font(.system(size: 15, weight: .regular))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.brandBlue)
                     Button {
                         draft.imageScale = 1.0
@@ -695,10 +809,14 @@ struct TextOverlayStepView: View {
                                 canvasSize: imgSize,
                                 isSelected: selectedGreetingsIndex == draft.greetingsOverlays.firstIndex(where: { $0.id == overlay.id }),
                                 onSelect: {
-                                    selectedGreetingsIndex = draft.greetingsOverlays.firstIndex(where: { $0.id == overlay.id })
+                                    // Tapping the badge opens the quick sheet in
+                                    // edit mode; its "More options" opens the
+                                    // full panel.
+                                    guard !showingGreetingsSheet, !showingCaptionSheet else { return }
                                     selectedIndex = nil
                                     selectedQRIndex = nil
                                     selectedBurstIndex = nil
+                                    startGreetingsEdit(imgSize: imgSize)
                                 }
                             )
                         }
@@ -738,10 +856,16 @@ struct TextOverlayStepView: View {
                                 canvasSize: imgSize,
                                 printCanvasSize: printCanvasSize,
                                 onSelect: {
-                                    selectedIndex = draft.textOverlays.firstIndex(where: { $0.id == overlay.id })
+                                    // Tapping a caption opens the quick sheet in
+                                    // edit mode; its "More options" opens the
+                                    // full panel.
+                                    guard !showingGreetingsSheet, !showingCaptionSheet else { return }
+                                    selectedIndex = nil
                                     selectedQRIndex = nil
                                     selectedBurstIndex = nil
                                     selectedGreetingsIndex = nil
+                                    captionEditID = overlay.id
+                                    showingCaptionSheet = true
                                 }
                             )
                         }
@@ -797,6 +921,16 @@ struct TextOverlayStepView: View {
                 .shadow(radius: 4)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 10)
+
+                if !isCoveringControlsOpen {
+                    Button(action: onAlterPhoto) {
+                        Text("Alter Photo")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.brandBlue)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 8)
+                }
                 }
 
                 // Any leftover space above/below the canvas (e.g. a short
@@ -825,48 +959,26 @@ struct TextOverlayStepView: View {
                     showingCaptionSheet = true
                 }) {
                     Label("Caption", systemImage: firstAvailableSymbol("text.bubble.badge.sparkles", "ellipsis.message"))
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.system(size: 17, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)
                         .foregroundColor(.primary)
                         .themedSurface(appSettings.uiTheme, cornerRadius: 999)
-                }
-                .sheet(isPresented: $showingCaptionSheet) {
-                    CaptionQuickAddSheet { text, style, colors in
-                        addTextOverlay(canvasWidth: pendingCaptionCanvasWidth, text: text, style: style, colors: colors)
-                    }
-                    .presentationDetents([.height(Self.captionSheetHeight)])
                 }
                 Button(action: {
                     if draft.greetingsOverlays.isEmpty {
                         startGreetingsPreview(imgSize: imgSize)
                     } else {
                         // Only one badge per card — edit the existing one.
-                        addGreetingsOverlay(imgSize: imgSize)
+                        startGreetingsEdit(imgSize: imgSize)
                     }
                 }) {
                     Label("Greetings", systemImage: firstAvailableSymbol("rectangle.badge.sparkles", "text.rectangle"))
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.system(size: 17, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)
                         .foregroundColor(.primary)
                         .themedSurface(appSettings.uiTheme, cornerRadius: 999)
-                }
-                .sheet(isPresented: $showingGreetingsSheet, onDismiss: finishGreetingsPreview) {
-                    GreetingsQuickAddSheet(
-                        initialIntro: Self.greetingsDefaultIntro,
-                        initialMarquee: Self.greetingsDefaultMarquee,
-                        initialPosition: .left,
-                        initialColor: .blue,
-                        onChange: { intro, marquee, position, color in
-                            updateGreetingsPreview(intro: intro, marquee: marquee, position: position, color: color)
-                        },
-                        onAdd: { greetingsAddConfirmed = true }
-                    )
-                    .presentationDetents([.height(Self.greetingsSheetHeight)])
-                    // The card stays visible and tappable behind the short sheet,
-                    // so the live badge can be watched while typing.
-                    .presentationBackgroundInteraction(.enabled)
                 }
                 // Burst feature hidden — code intact, re-enable by restoring this button
                 // Button(action: { addBurstOverlay(canvasHeight: imgSize.height) }) {
@@ -889,7 +1001,7 @@ struct TextOverlayStepView: View {
                 }
             }) {
                 Label("Invisible Ink", systemImage: "eye.slash")
-                    .font(.system(size: 17, weight: .regular))
+                    .font(.system(size: 17, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 7)
                     .foregroundColor(.primary)
@@ -911,7 +1023,7 @@ struct TextOverlayStepView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.secondary)
             Text("No photo yet")
-                .font(.subheadline)
+                .font(.subheadline.weight(.semibold))
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
             Spacer()
@@ -1073,7 +1185,8 @@ struct TextOverlayStepView: View {
         }
     }
 
-    private func addTextOverlay(canvasWidth: CGFloat, text: String, style: TextBgStyle, colors: CaptionColorPreset) {
+    @discardableResult
+    private func addTextOverlay(canvasWidth: CGFloat, text: String, style: TextBgStyle, colors: CaptionColorPreset) -> UUID {
         let width = canvasWidth > 0
             ? canvasWidth
             : imageAreaSize(in: postcardFrameSize(availableSize: UIScreen.main.bounds.size)).width
@@ -1094,6 +1207,69 @@ struct TextOverlayStepView: View {
         // Placed on the card without opening the full edit panel — tapping the
         // caption on the card does that.
         draft.textOverlays.append(overlay)
+        return overlay.id
+    }
+
+    // MARK: Caption quick sheet (new + edit)
+
+    @ViewBuilder
+    private func captionSheetContent() -> some View {
+        if let id = captionEditID {
+            // (If the caption was just deleted, render nothing while the sheet
+            // finishes dismissing rather than flashing the "new" layout.)
+            if let o = draft.textOverlays.first(where: { $0.id == id }) {
+                CaptionQuickAddSheet(
+                    edit: CaptionEditActions(
+                        setText: { t in
+                            guard let i = draft.textOverlays.firstIndex(where: { $0.id == id }) else { return }
+                            draft.textOverlays[i].text = t
+                            if draft.textOverlays[i].widthAutoFit { draft.textOverlays[i].autoFitWidth() }
+                        },
+                        setStyle: { st in
+                            guard let i = draft.textOverlays.firstIndex(where: { $0.id == id }) else { return }
+                            draft.textOverlays[i].bgStyle = st
+                        },
+                        setColors: { c in
+                            guard let i = draft.textOverlays.firstIndex(where: { $0.id == id }) else { return }
+                            draft.textOverlays[i].textColor = c.font
+                            draft.textOverlays[i].bgColor = c.background
+                            draft.textOverlays[i].borderEnabled = c.border
+                            draft.textOverlays[i].borderUsesFontColor = c.borderUsesFontColor
+                        },
+                        delete: { draft.textOverlays.removeAll { $0.id == id } }
+                    ),
+                    initialText: o.text,
+                    initialStyle: o.bgStyle,
+                    initialColors: CaptionColorPreset.matching(font: o.textColor, background: o.bgColor),
+                    onAdd: { _, _, _ in },
+                    onMore: { _, _, _ in pendingFullCaptionID = id },
+                    onClose: { showingCaptionSheet = false }
+                )
+            }
+        } else {
+            CaptionQuickAddSheet(
+                onAdd: { text, style, colors in
+                    addTextOverlay(canvasWidth: pendingCaptionCanvasWidth, text: text, style: style, colors: colors)
+                },
+                onMore: { text, style, colors in
+                    pendingFullCaptionID = addTextOverlay(canvasWidth: pendingCaptionCanvasWidth, text: text, style: style, colors: colors)
+                },
+                onClose: { showingCaptionSheet = false }
+            )
+        }
+    }
+
+    // Runs when the caption sheet has closed: if "More options" was pressed,
+    // select that caption so the full panel comes up.
+    private func finishCaptionSheet() {
+        captionEditID = nil
+        guard let id = pendingFullCaptionID else { return }
+        pendingFullCaptionID = nil
+        guard let i = draft.textOverlays.firstIndex(where: { $0.id == id }) else { return }
+        selectedIndex = i
+        selectedQRIndex = nil
+        selectedBurstIndex = nil
+        selectedGreetingsIndex = nil
     }
 
     private func addBurstOverlay(canvasHeight: CGFloat) {
@@ -1161,6 +1337,55 @@ struct TextOverlayStepView: View {
         showingGreetingsSheet = true
     }
 
+    // The sheet for the badge: NEW (preview already on the card, kept on Save)
+    // or EDIT of the existing badge (live; trash deletes).
+    @ViewBuilder
+    private func greetingsSheetContent() -> some View {
+        if greetingsEditing {
+            if let o = draft.greetingsOverlays.first(where: { $0.id == greetingsPreviewID }) {
+                GreetingsQuickAddSheet(
+                    initialIntro: o.scriptText,
+                    initialMarquee: o.word,
+                    initialPosition: o.fixedPosition,
+                    initialColor: o.badgeColorChoice,
+                    onChange: { intro, marquee, position, color in
+                        updateGreetingsPreview(intro: intro, marquee: marquee, position: position, color: color)
+                    },
+                    onAdd: { },
+                    onDelete: { greetingsDeleteRequested = true },
+                    onMore: { greetingsOpenFullPanel = true },
+                    onClose: { showingGreetingsSheet = false }
+                )
+            }
+        } else {
+            GreetingsQuickAddSheet(
+                initialIntro: Self.greetingsDefaultIntro,
+                initialMarquee: Self.greetingsDefaultMarquee,
+                initialPosition: .left,
+                initialColor: .blue,
+                onChange: { intro, marquee, position, color in
+                    updateGreetingsPreview(intro: intro, marquee: marquee, position: position, color: color)
+                },
+                onAdd: { greetingsAddConfirmed = true },
+                onMore: { greetingsAddConfirmed = true; greetingsOpenFullPanel = true },
+                onClose: { showingGreetingsSheet = false }
+            )
+        }
+    }
+
+    // Existing badge tapped (on the card or via the Greetings button): open the
+    // sheet editing it live. Changes are kept however the sheet closes.
+    private func startGreetingsEdit(imgSize: CGSize) {
+        guard let overlay = draft.greetingsOverlays.first else { return }
+        pendingGreetingsImgSize = imgSize
+        greetingsEditing = true
+        greetingsAddConfirmed = true
+        greetingsOpenFullPanel = false
+        greetingsDeleteRequested = false
+        greetingsPreviewID = overlay.id
+        showingGreetingsSheet = true
+    }
+
     // Each edit in the sheet updates the badge on the card.
     private func updateGreetingsPreview(intro: String, marquee: String, position: GreetingsFixedPosition, color: GreetingsBadgeColor) {
         guard let id = greetingsPreviewID,
@@ -1171,12 +1396,28 @@ struct TextOverlayStepView: View {
         draft.greetingsOverlays[i].badgeColorChoice = color
     }
 
-    // Runs whenever the sheet closes. Add → keep the badge (re-clamp the photo
-    // for its final text/position, panel stays closed). Cancel or swipe-down →
+    // Runs whenever the sheet closes. Save → keep the badge (re-clamp the photo
+    // for its final text/position, panel stays closed). trash →
     // remove the badge and put the photo and cutout back as they were.
     private func finishGreetingsPreview() {
-        defer { greetingsPreviewID = nil }
+        defer {
+            greetingsPreviewID = nil
+            greetingsEditing = false
+            if greetingsOpenFullPanel, !draft.greetingsOverlays.isEmpty {
+                selectedGreetingsIndex = 0
+                selectedIndex = nil
+                selectedQRIndex = nil
+                selectedBurstIndex = nil
+            }
+            greetingsOpenFullPanel = false
+            greetingsDeleteRequested = false
+        }
         guard let id = greetingsPreviewID else { return }
+        if greetingsDeleteRequested {
+            // Same as the full panel's Delete.
+            draft.greetingsOverlays.removeAll { $0.id == id }
+            return
+        }
         if greetingsAddConfirmed {
             clampPhotoToSafeZone(imgSize: pendingGreetingsImgSize)
             rerenderComposedImage()
@@ -1554,7 +1795,7 @@ struct TextOverlayEditPanel: View {
                     )
                 } else {
                     Button("Halo") { overlay.haloEnabled.toggle() }
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 13, weight: .semibold))
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 16)
                         .frame(height: 30)
@@ -1647,8 +1888,8 @@ struct TextOverlayEditPanel: View {
 
             // Row 5: Done, Delete — last.
             HStack(spacing: 8) {
-                Button("Done", action: onDone)
-                    .buttonStyle(DonePillButtonStyle())
+                Button("Save", action: onDone)
+                    .savePill()
 
                 Button(action: onDelete) {
                     Image(systemName: "trash").foregroundColor(.red)
@@ -1766,13 +2007,8 @@ struct QROverlayEditPanel: View {
             // Row 1: Done, Delete, corner-move buttons
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    Button("Done", action: onDone)
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Color.accentColor)
-                        .foregroundColor(.white)
-                        .cornerRadius(999)
+                    Button("Save", action: onDone)
+                        .savePill()
 
                     Button(action: onDelete) {
                         Image(systemName: "trash").foregroundColor(.red)

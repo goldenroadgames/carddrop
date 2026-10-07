@@ -259,7 +259,7 @@ struct EmailSignupView: View {
                                 .disabled(isLoading)
 
                         case .resetSent:
-                            Text("Reset link sent — check your inbox.")
+                            Text("Reset link sent. If you don't see it, check your junk folder.")
                                 .font(.subheadline).foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                         }

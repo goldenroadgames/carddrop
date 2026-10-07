@@ -84,7 +84,7 @@ enum CardUploadService {
         let dbTier        = userRow.tier             ?? "free"
 
         let isAnonymous = user.isAnonymous
-        let isVerified  = user.userMetadata["send_unlocked"] == .bool(true)
+        let isVerified  = user.isSendVerified
 
         let tier: String
         if dbTier == "unlimited"  { tier = "unlimited" }

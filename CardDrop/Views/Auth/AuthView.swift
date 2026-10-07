@@ -96,6 +96,17 @@ struct AuthView: View {
         .sheet(isPresented: $showEmailSignIn) {
             EmailSignupView(onSuccess: {})
         }
+        .alert(
+            "Couldn't Continue",
+            isPresented: Binding(
+                get: { authManager.signInAlertMessage != nil },
+                set: { if !$0 { authManager.signInAlertMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(authManager.signInAlertMessage ?? "")
+        }
     }
 
     // supabase.auth.update(user:) (called by EmailSignupView.createAccount())
@@ -116,6 +127,7 @@ struct AuthView: View {
                     showEmailSignIn = true
                 } catch {
                     print("❌ signInAnonymously (for email signup) failed: \(error)")
+                    authManager.signInAlertMessage = AuthManager.signInFailureMessage(for: error)
                 }
                 isBootstrappingEmailSignIn = false
             }
@@ -133,6 +145,7 @@ struct AuthView: View {
                     onSkip?()
                 } catch {
                     print("❌ signInAnonymously failed: \(error)")
+                    authManager.signInAlertMessage = AuthManager.signInFailureMessage(for: error)
                 }
                 isLoading = false
             }

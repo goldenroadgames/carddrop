@@ -11,13 +11,16 @@ struct MainTabView: View {
     @State private var profileIsDirty = false
     @State private var showUnsavedAlert = false
     @State private var intendedTab: AppTab = .postcards
+    @State private var showInspire = false
 
-    enum AppTab { case postcards, profile }
+    // .inspire is never actually selected — it's a link segment that opens
+    // the Inspire gallery as a sheet (see pickerBinding).
+    enum AppTab { case inspire, postcards, profile }
 
     var body: some View {
         Group {
             switch selectedTab {
-            case .postcards:
+            case .postcards, .inspire:
                 PostcardsView()
             case .profile:
                 ProfileView(isDirty: $profileIsDirty)
@@ -27,6 +30,7 @@ struct MainTabView: View {
             VStack(spacing: 0) {
                 Divider()
                 Picker("", selection: pickerBinding) {
+                    Text("Inspired").tag(AppTab.inspire)
                     Text("Postcards").tag(AppTab.postcards)
                     Text("Profile").tag(AppTab.profile)
                 }
@@ -54,6 +58,10 @@ struct MainTabView: View {
             .environmentObject(draftManager)
             .environmentObject(addressBook)
         }
+        .sheet(isPresented: $showInspire) {
+            InspireGalleryView()
+                .presentationBackground(Color(.systemBackground))
+        }
         .sheet(isPresented: $showOTPGate) {
             OTPVerificationView()
                 .environmentObject(authManager)
@@ -67,6 +75,14 @@ struct MainTabView: View {
             get: { selectedTab },
             set: { newTab in
                 guard newTab != selectedTab else { return }
+                if newTab == .inspire {
+                    // Link, not a tab: open the gallery over whatever page
+                    // is showing; selection stays where it was. Nothing is
+                    // left behind, so no unsaved-changes prompt is needed
+                    // even over a dirty Profile.
+                    showInspire = true
+                    return
+                }
                 if selectedTab == .profile && profileIsDirty {
                     intendedTab = newTab
                     showUnsavedAlert = true

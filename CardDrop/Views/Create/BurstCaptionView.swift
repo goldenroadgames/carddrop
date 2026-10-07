@@ -252,7 +252,7 @@ struct BurstCaptionEditPanel: View {
                 .cornerRadius(8)
 
                 VStack(spacing: 4) {
-                    Button("Done", action: onDone)
+                    Button("Save", action: onDone)
                         .font(.subheadline.weight(.medium))
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())

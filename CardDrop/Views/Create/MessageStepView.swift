@@ -114,16 +114,22 @@ struct MessageStepView: View {
 
                     SlidingTogglePill(
                         options: [(CardbackMessageFont.print, "Print"), (.script, "Script")],
-                        selection: draft.messageFont
+                        selection: draft.messageFont,
+                        weight: .semibold
                     ) { option in
-                        draft.messageFont = option
+                        // Switching fonts changes the metrics — refuse if the
+                        // current message wouldn't fit in both sizes with it.
+                        if MessageLayout.measure(draft.message, font: option).fits {
+                            draft.messageFont = option
+                        }
                     }
                     .frame(width: 150)
 
                     Spacer()
-                    Text("\(draft.message.count)/525")
-                        .font(.caption)
-                        .foregroundColor(draft.message.count >= 525 ? .red : .secondary)
+                    let fillPercent = Int((MessageLayout.measure(draft.message, font: draft.messageFont).fill * 100).rounded())
+                    Text("\(fillPercent)% full")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(fillPercent >= 100 || draft.message.count >= 525 ? .red : .secondary)
                 }
                 .padding(.top, 4)
 
@@ -144,12 +150,28 @@ struct MessageStepView: View {
                         .padding(.top, -8)
                         .focused($focus, equals: .message)
                         .onKeyPress(.tab) { .handled }
-                        .onKeyPress(.return) { .handled }
-                        .onChange(of: draft.message) { _, new in
-                            let cleaned = String(new.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
-                            let trimmed = cleaned.count > 525 ? String(cleaned.prefix(525)) : cleaned
-                            if trimmed != new {
-                                draft.message = trimmed
+                        .onChange(of: draft.message) { old, new in
+                            let cleaned = String(new.replacingOccurrences(of: "\r\n", with: "\n").unicodeScalars.filter { $0 == "\n" || !CharacterSet.controlCharacters.contains($0) })
+                            var accepted = cleaned.count > 525 ? String(cleaned.prefix(525)) : cleaned
+                            // The real limit: the message must fit inside BOTH
+                            // card sizes' polygons. Deleting is always allowed
+                            // (an old draft may already overflow).
+                            let font = draft.messageFont
+                            if accepted.count > old.count, !MessageLayout.measure(accepted, font: font).fits {
+                                if accepted.count - old.count == 1 {
+                                    accepted = old
+                                } else {
+                                    // Paste: keep the longest prefix that fits.
+                                    var lo = 0, hi = accepted.count
+                                    while lo < hi {
+                                        let mid = (lo + hi + 1) / 2
+                                        if MessageLayout.measure(String(accepted.prefix(mid)), font: font).fits { lo = mid } else { hi = mid - 1 }
+                                    }
+                                    accepted = String(accepted.prefix(lo))
+                                }
+                            }
+                            if accepted != new {
+                                draft.message = accepted
                             }
                         }
                 }
@@ -331,7 +353,7 @@ struct MessageStepView: View {
             HStack(alignment: .center, spacing: 12) {
                 HStack(spacing: 6) {
                     Text("To")
-                        .font(.system(size: 15, weight: .regular))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.brandBlue)
                     Button {
                         showToContactPicker = true
@@ -358,7 +380,7 @@ struct MessageStepView: View {
 
                 HStack(spacing: 6) {
                     Text("From")
-                        .font(.system(size: 15, weight: .regular))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.brandBlue)
                     TextField("e.g. Pookie", text: $draft.senderNickname)
                         .font(messageEditorFont)   // same size as the message box
@@ -385,7 +407,7 @@ struct MessageStepView: View {
 
             if usedContactPickerForTo {
                 Text("Edit to use a different nickname, sunshine")
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.brandBlue)
                     .padding(.leading, 8)
             }
@@ -459,7 +481,7 @@ struct CompactSegmentedControl: View {
                     selection = option
                 } label: {
                     Text(option)
-                        .font(.system(size: 15, weight: .regular))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(selection == option ? .primary : .secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 4)

@@ -10,9 +10,13 @@ struct MailingAddressFormView: View {
     /// picker (sender/recipient) pass that type; the standalone Profile
     /// "Mailing Addresses" screen leaves it at the default.
     var defaultType: MailingAddressType = .recipient
+    /// Whether a default sender (address-book .profile row) already exists.
+    /// When false, the default-sender toggle starts on.
+    var hasDefaultSender: Bool = true
     var onSaved: (SavedMailingAddress) async -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var authManager: AuthManager
 
     @State private var nickname = ""
     @State private var firstName = ""
@@ -30,6 +34,7 @@ struct MailingAddressFormView: View {
     @State private var errorMessage: String?
     @State private var hasSaved = false
     @State private var makeDefaultSender = false
+    @State private var makeProfileAddress = false
 
     /// Only the sender picker's "Add New Address" offers this — a one-time
     /// override sender shouldn't silently become the account default, so
@@ -77,8 +82,9 @@ struct MailingAddressFormView: View {
                 if showsDefaultSenderToggle {
                     Section {
                         Toggle("Save as my default sender address", isOn: $makeDefaultSender)
+                        Toggle("Save as my profile address", isOn: $makeProfileAddress)
                     } footer: {
-                        Text("Off just uses this address for this postcard. On replaces your default return address going forward.")
+                        Text("Off just uses this address for this postcard. Default sender replaces your default return address going forward; profile address replaces the address on your Profile tab. Either starts on if that spot is empty.")
                     }
                 }
                 verifySection
@@ -91,12 +97,10 @@ struct MailingAddressFormView: View {
             .navigationTitle(existing == nil ? "Add Address" : "Edit Address")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                toolbarPillItem(hasSaved ? "Close" : "Cancel", placement: .cancellationAction) { dismiss() }
+                toolbarPillItem(hasSaved ? "Close" : "Cancel", placement: .cancellationAction, style: .filled) { dismiss() }
                 if !hasSaved {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") { Task { await save() } }
-                            .disabled(!canSave || isSaving)
-                    }
+                    toolbarPillItem("Save", placement: .confirmationAction, style: .filled,
+                                    isDisabled: !canSave || isSaving) { Task { await save() } }
                 }
             }
             .onAppear(perform: loadExisting)
@@ -121,6 +125,10 @@ struct MailingAddressFormView: View {
     }
 
     private func loadExisting() {
+        if showsDefaultSenderToggle {
+            makeDefaultSender = !hasDefaultSender
+            makeProfileAddress = authManager.profileStreet.trimmingCharacters(in: .whitespaces).isEmpty
+        }
         guard let existing else { return }
         nickname = existing.nickname ?? ""
         firstName = existing.firstName ?? ""
@@ -162,6 +170,11 @@ struct MailingAddressFormView: View {
         do {
             var saved = try await AddressBookService.save(record, existing: existing)
             hasSaved = true
+            if showsDefaultSenderToggle && makeProfileAddress {
+                authManager.saveProfileAddress(firstName: firstName, lastName: lastName, phone: phone,
+                                               street: street, city: city, state: state, zip: zip,
+                                               country: country.isEmpty ? "US" : country)
+            }
             await onSaved(saved)
 
             if saved.isVerified {
@@ -184,4 +197,5 @@ struct MailingAddressFormView: View {
 
 #Preview {
     MailingAddressFormView(existing: nil, onSaved: { _ in })
+        .environmentObject(AuthManager())
 }

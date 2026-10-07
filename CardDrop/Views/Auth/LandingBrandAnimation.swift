@@ -161,6 +161,10 @@ struct LandingBrandAnimation<Controls: View>: View {
     // area; this opacity fades it away once the reveal fully settles, so
     // it doesn't linger as a permanent gray strip behind the final UI.
     @State private var backdropOpacity: Double = 1
+    // Removed from the tree once the reveal settles, so the mosaic can
+    // never peek out around the curtain on any screen size.
+    @State private var showMosaic: Bool = true
+    @State private var mosaicOpacity: Double = 1
 
     private var wordmarkFont: Font {
         Font(UIFont(name: "Inter-ExtraBold", size: Layout.wordmarkFontSize) ?? UIFont.boldSystemFont(ofSize: Layout.wordmarkFontSize))
@@ -195,12 +199,15 @@ struct LandingBrandAnimation<Controls: View>: View {
             ZStack {
                 // Stays visible (through the fall/bounce) until the real
                 // content stack's opaque background rises up and covers it.
-                CardDropMosaicBackground(
-                    viewportSize: geo.size,
-                    anchor: openingAnchor,
-                    tileSize: CGSize(width: wordmarkWidth, height: cardRowHeight),
-                    tileFont: wordmarkFont
-                )
+                if showMosaic {
+                    CardDropMosaicBackground(
+                        viewportSize: geo.size,
+                        anchor: openingAnchor,
+                        tileSize: CGSize(width: wordmarkWidth, height: cardRowHeight),
+                        tileFont: wordmarkFont
+                    )
+                    .opacity(mosaicOpacity)
+                }
 
                 VStack(spacing: 0) {
                     Spacer()
@@ -312,7 +319,7 @@ struct LandingBrandAnimation<Controls: View>: View {
         // Fades away once the reveal fully settles, so it never lingers
         // behind the final UI.
         .background(
-            Color(white: 0.97)
+            Color(white: 0.99)
                 .opacity(backdropOpacity)
                 .ignoresSafeArea(edges: .bottom)
         )
@@ -372,6 +379,11 @@ struct LandingBrandAnimation<Controls: View>: View {
             withAnimation(.linear(duration: Timing.riseDuration)) {
                 groupOffsetY = 0
             }
+            // Fully gone just before the rise ends, so it's invisible by
+            // the time the stack tops out and bounces.
+            withAnimation(.linear(duration: 1.7)) {
+                mosaicOpacity = 0
+            }
         }
 
         // The sign-in controls are home now and stop — groupOffsetY is
@@ -380,6 +392,7 @@ struct LandingBrandAnimation<Controls: View>: View {
         // down to settle.
         let overshootStart = riseStart + Timing.riseDuration
         DispatchQueue.main.asyncAfter(deadline: .now() + overshootStart) {
+            showMosaic = false
             withAnimation(.easeOut(duration: Timing.overshootDuration)) {
                 stackOvershootY = -Layout.overshootDistance
             }

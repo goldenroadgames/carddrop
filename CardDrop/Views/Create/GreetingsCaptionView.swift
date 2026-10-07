@@ -859,7 +859,7 @@ struct GreetingsCaptionEditPanel: View {
                             .onTapGesture { overlay.scriptColorChoice = choice }
                     }
                     Button("Halo") { overlay.haloEnabled.toggle() }
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 13, weight: .semibold))
                         .fixedSize(horizontal: true, vertical: false)
                         .padding(.horizontal, 16)
                         .frame(height: 30)
@@ -896,19 +896,21 @@ struct GreetingsCaptionEditPanel: View {
                 }
             }
 
-            // Row 3: Position — 3 mutually exclusive buttons (Center / Tilt /
+            // Row 3: Position — one segmented control (Center / Tilt /
             // Corner) and the Mirror toggle (only really visible with Tilt),
             // all on one line.
             HStack(spacing: 8) {
-                ForEach(GreetingsFixedPosition.allCases, id: \.self) { pos in
-                    Button(pos.displayName) { overlay.fixedPosition = pos }
-                        .font(.system(size: 13, weight: .medium))
-                        .padding(.horizontal, 10)
-                        .frame(height: 30)
-                        .background(overlay.fixedPosition == pos ? Color.accentColor : Color(.secondarySystemBackground))
-                        .foregroundColor(overlay.fixedPosition == pos ? .white : .primary)
-                        .cornerRadius(999)
-                }
+                CompactSegmentedControl(
+                    options: GreetingsFixedPosition.allCases.map(\.displayName),
+                    selection: Binding(
+                        get: { overlay.fixedPosition.displayName },
+                        set: { name in
+                            if let pos = GreetingsFixedPosition.allCases.first(where: { $0.displayName == name }) {
+                                overlay.fixedPosition = pos
+                            }
+                        }
+                    )
+                )
                 Text("Mirror").font(.caption).foregroundColor(.secondary)
                 Button(action: { photoMirrorEnabled.toggle() }) {
                     Image(systemName: "arrow.up.arrow.down")
@@ -982,13 +984,8 @@ struct GreetingsCaptionEditPanel: View {
             // Row 5: Done / Delete — on their own line, below the rest of
             // the controls rather than crowding the word-input row.
             HStack(spacing: 8) {
-                Button("Done", action: onDone)
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(Color.accentColor)
-                    .foregroundColor(.white)
-                    .cornerRadius(999)
+                Button("Save", action: onDone)
+                    .savePill()
 
                 Button(action: onDelete) {
                     Image(systemName: "trash").foregroundColor(.red)

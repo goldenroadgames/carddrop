@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     // Priority: unlimited (paid) > verified (OTP done) > unverified > anonymous
     // ----------------------------------------------------------------
     const isAnonymous = user.is_anonymous ?? false;
-    const isVerified  = user.user_metadata?.send_unlocked === true;
+    const isVerified  = isVerifiedUser(user);
 
     let tier: string;
     if (dbTier === "unlimited")  tier = "unlimited";
@@ -194,4 +194,16 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// A user counts as verified if the verify-email-otp function marked them
+// (app_metadata is writable only with the service role) or they signed in
+// with Apple (Supabase adds an apple identity only after validating Apple's
+// token). user_metadata.send_unlocked is NOT trusted: users can write it.
+function isVerifiedUser(user: {
+  app_metadata?: Record<string, unknown> | null;
+  identities?: { provider: string }[] | null;
+}): boolean {
+  return user.app_metadata?.send_unlocked === true ||
+    (user.identities ?? []).some((i) => i.provider === "apple");
 }

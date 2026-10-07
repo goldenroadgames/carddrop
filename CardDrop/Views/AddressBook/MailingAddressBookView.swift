@@ -12,6 +12,7 @@ struct MailingAddressBookView: View {
     @State private var verifyingID: UUID?
     @State private var verifyError: String?
     @State private var showVerifyError = false
+    @State private var addressToDelete: SavedMailingAddress?
 
     var body: some View {
         List {
@@ -44,7 +45,7 @@ struct MailingAddressBookView: View {
                 }
             }
         }
-        .navigationTitle("Mailing Addresses")
+        .navigationTitle("Saved Addresses")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -63,6 +64,15 @@ struct MailingAddressBookView: View {
         .sheet(item: $editingAddress) { address in
             MailingAddressFormView(existing: address) { _ in await load() }
         }
+        .alert("Delete this address?", isPresented: Binding(
+            get: { addressToDelete != nil },
+            set: { if !$0 { addressToDelete = nil } }
+        ), presenting: addressToDelete) { address in
+            Button("Delete", role: .destructive) { deleteAddress(address) }
+            Button("Cancel", role: .cancel) {}
+        } message: { address in
+            Text(address.nickname?.isEmpty == false ? address.nickname! : address.displayName)
+        }
         .alert("Couldn't Verify Address", isPresented: $showVerifyError, presenting: verifyError) { _ in
             Button("OK") {}
         } message: { message in
@@ -75,11 +85,12 @@ struct MailingAddressBookView: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(address.nickname?.isEmpty == false ? address.nickname! : address.displayName)
-                    .font(.body)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
                 if !address.formattedAddress.isEmpty {
                     Text(address.formattedAddress)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.primary)
                         .lineLimit(2)
                 }
             }
@@ -96,6 +107,12 @@ struct MailingAddressBookView: View {
                 .buttonStyle(.borderless)
                 .font(.caption.weight(.semibold))
             }
+            Button {
+                addressToDelete = address
+            } label: {
+                Image(systemName: "trash").foregroundColor(.red)
+            }
+            .buttonStyle(.borderless)
         }
         .padding(.vertical, 2)
     }
@@ -118,6 +135,11 @@ struct MailingAddressBookView: View {
                 try? await AddressBookService.delete(id: address.id)
             }
         }
+    }
+
+    private func deleteAddress(_ address: SavedMailingAddress) {
+        addresses.removeAll { $0.id == address.id }
+        Task { try? await AddressBookService.delete(id: address.id) }
     }
 
     private func verify(_ address: SavedMailingAddress) async {

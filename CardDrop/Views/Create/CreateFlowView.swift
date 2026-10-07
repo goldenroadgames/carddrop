@@ -63,7 +63,7 @@ struct CreateFlowView: View {
                 case 0:
                     ChoosePhotoStepView(draft: draft, onNext: { currentStep = 1 })
                 case 1:
-                    TextOverlayStepView(draft: draft, onNext: { currentStep = 2 })
+                    TextOverlayStepView(draft: draft, onNext: { currentStep = 2 }, onAlterPhoto: { currentStep = 0 })
                 case 2:
                     MessageStepView(draft: draft, onNext: {
                         currentStep = 4

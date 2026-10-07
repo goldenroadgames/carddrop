@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="-1.8 -1.8 34 30.8">
+<defs>
+ <mask id="phone" maskUnits="userSpaceOnUse" x="0" y="6" width="14" height="22">
+  <rect x=".1" y="6.6" width="13" height="20.4" rx="2.85" fill="white"/>
+  <rect x="3.6" y="9.7" width="6" height="2.4" rx=".65" fill="black"/>
+ </mask>
+ <mask id="mail" maskUnits="userSpaceOnUse" x="10" y="0" width="19" height="15">
+  <rect x="11" y=".9" width="16.8" height="12.7" rx="2.2" fill="white"/>
+  <path d="M14.6 5h4.8 M14.6 7h3.5" fill="none" stroke="black" stroke-width="1.35" stroke-linecap="round"/>
+  <circle cx="23.1" cy="5.8" r="1.35" fill="black"/>
+ </mask>
+</defs>
+<g transform="rotate(-12 6.6 17)">
+ <rect x=".1" y="6.6" width="13" height="20.4" rx="2.85" fill="black" mask="url(#phone)"/>
+</g>
+<g transform="translate(2.8 -1.4) rotate(-12 19.6 7.1)">
+ <rect x="11" y=".9" width="16.8" height="12.7" rx="2.2" fill="black" mask="url(#mail)"/>
+</g>
+</svg>

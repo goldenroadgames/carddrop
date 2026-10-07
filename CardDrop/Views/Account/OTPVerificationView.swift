@@ -34,7 +34,7 @@ struct OTPVerificationView: View {
                             .font(.title2.weight(.bold))
                         Text(otpEmail)
                             .font(.subheadline)
-                        Text("Enter the 6-digit code we emailed you.")
+                        Text("Enter the 6-digit code we emailed you. Check your junk folder if it doesn't arrive.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)

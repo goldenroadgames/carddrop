@@ -16,7 +16,7 @@ struct PostcardsView: View {
     @State private var showRepliesPanel = false
     @State private var sentDetailSnapshot: PostcardDraftSnapshot? = nil
 
-    enum CardTab { case sent, drafts }
+    enum CardTab { case sent, drafts, rings }
 
     struct ResumeParams: Identifiable {
         let id = UUID()
@@ -31,10 +31,12 @@ struct PostcardsView: View {
             VStack(spacing: 0) {
                 Button(action: { showCreateFlow = true }) {
                     HStack {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                        Text("Create a Postcard")
-                            .font(.headline)
+                        Image("SendIcon")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 32)
+                        Text("Send a Postcard")
+                            .font(.headline.weight(.bold))
                     }
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -49,6 +51,7 @@ struct PostcardsView: View {
                 Picker("", selection: $selectedTab) {
                     Text("Sent").tag(CardTab.sent)
                     Text("Drafts").tag(CardTab.drafts)
+                    Text("Rings").tag(CardTab.rings)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
@@ -64,6 +67,8 @@ struct PostcardsView: View {
                     sentContent
                 case .drafts:
                     draftsContent
+                case .rings:
+                    ringsContent
                 }
             }
             .navigationBarHidden(true)
@@ -87,7 +92,7 @@ struct PostcardsView: View {
             if !authManager.isAnonymous && !authManager.isEmailVerified && authManager.nearMonthlyLimit {
                 Button(action: { showOTPVerification = true }) {
                     Text("Verify your email for unlimited sending")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 21, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(Color.brandBlue)
@@ -100,7 +105,7 @@ struct PostcardsView: View {
             } else if authManager.isAnonymous && authManager.nearMonthlyLimit {
                 Button(action: { showSignInGate = true }) {
                     Text("Create an account for unlimited sending")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 21, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(Color.brandBlue)
@@ -223,6 +228,38 @@ struct PostcardsView: View {
         draftManager.drafts.filter { $0.status == .sent }.sorted { $0.lastModified > $1.lastModified }
     }
 
+    private var ringsContent: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .top) {
+                VStack(spacing: 16) {
+                    Text("Gather your people")
+                        .font(.system(size: 32, weight: .bold))
+                    // Paragraph gap is half a line (21pt text, ~25pt line).
+                    VStack(spacing: 12) {
+                        Text("Send invitations, thank you's,\nholiday cards, announcements.")
+                        Text("By mail or digital.")
+                        Text("Every moment, delivered.")
+                    }
+                    .font(.system(size: 21, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                }
+                .padding(.top, geo.size.height / 20)
+
+                Text("Coming Spring 2027")
+                    .font(.system(size: 21, weight: .semibold))
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    // The Postcards/Profile bar is a .safeAreaInset on an
+                    // ancestor of the NavigationStack, so it isn't reflected
+                    // in this view's safe area — clear it by hand (~64pt bar
+                    // + 32pt breathing room).
+                    .padding(.bottom, 96)
+            }
+            .foregroundColor(.brandBlue)
+            .padding(.horizontal, 32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
     @ViewBuilder
     private var draftsContent: some View {
         if unsentDrafts.isEmpty {
@@ -238,6 +275,7 @@ struct PostcardsView: View {
                         CardTileView(
                             snapshot: snapshot,
                             loadImage: { draftManager.thumbnail(for: snapshot) },
+                            loadBackImage: { nil },
                             onOpen: { openDraft(snapshot) },
                             onDelete: { deleteTargetID = snapshot.id }
                         )
@@ -268,6 +306,7 @@ struct PostcardsView: View {
                             snapshot: snapshot,
                             showsReplyBadges: true,
                             loadImage: { snapshot.cardID.flatMap { draftManager.loadFront(for: $0) } },
+                            loadBackImage: { snapshot.cardID.flatMap { draftManager.loadBack(for: $0) } },
                             onOpen: { sentDetailSnapshot = snapshot },
                             onDelete: { deleteTargetID = snapshot.id }
                         )
@@ -325,12 +364,18 @@ struct CardTileView: View {
     let snapshot: PostcardDraftSnapshot
     var showsReplyBadges: Bool = false
     let loadImage: () -> UIImage?
+    // Drafts have no baked back yet (it's only rendered at send time), so the
+    // Drafts grid passes `{ nil }` and the download saves just the front.
+    let loadBackImage: () -> UIImage?
     let onOpen: () -> Void
     let onDelete: () -> Void
 
     @State private var image: UIImage? = nil
     @State private var reactions: [CardReaction] = []
     @State private var replyCount: Int = 0
+
+    // One shared diameter for the trash, download, and reply/reaction circles.
+    private let circleSize: CGFloat = 32
 
     private var placeholderAspectRatio: CGFloat { snapshot.orientationIsLandscape ? 3.0 / 2.0 : 2.0 / 3.0 }
     // "Classic" cards bake a white border into the image itself — inset the
@@ -362,39 +407,48 @@ struct CardTileView: View {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.white)
-                    .padding(8)
-                    .background(Color.black)
+                    .frame(width: circleSize, height: circleSize)
+                    .background(Color.brandBlue)
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
             .padding(.leading, hasWhiteBorder ? 18 : 8)
             .padding(.bottom, hasWhiteBorder ? 16 : 8)
         }
-        // Reply/reaction summary — same corner-inset logic as the trash
-        // button (mirrored to the opposite corner) so both clear a baked-in
-        // "Classic" border the same way.
+        // Reply/reaction summary + download button — same corner-inset logic
+        // as the trash button (mirrored to the opposite corner) so both clear
+        // a baked-in "Classic" border the same way.
         .overlay(alignment: .bottomTrailing) {
-            if showsReplyBadges && (!reactions.isEmpty || replyCount > 0) {
-                HStack(spacing: 4) {
+            HStack(spacing: 4) {
+                if showsReplyBadges {
                     ForEach(Array(Set(reactions.map(\.emoji))).sorted().prefix(3), id: \.self) { emoji in
                         Text(emoji)
-                            .font(.system(size: 13))
-                            .frame(width: 24, height: 24)
+                            .font(.system(size: 16))
+                            .frame(width: circleSize, height: circleSize)
                             .background(Color.white)
                             .clipShape(Circle())
                     }
                     if replyCount > 0 {
                         Text("\(replyCount)")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 14, weight: .bold))
                             .foregroundColor(.white)
-                            .frame(width: 22, height: 22)
+                            .frame(width: circleSize, height: circleSize)
                             .background(Color.brandBlue)
                             .clipShape(Circle())
                     }
                 }
-                .padding(.trailing, hasWhiteBorder ? 18 : 8)
-                .padding(.bottom, hasWhiteBorder ? 16 : 8)
+                Button(action: share) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: circleSize, height: circleSize)
+                        .background(Color.brandBlue)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
             }
+            .padding(.trailing, hasWhiteBorder ? 18 : 8)
+            .padding(.bottom, hasWhiteBorder ? 16 : 8)
         }
         .task(id: snapshot.lastModified) {
             image = loadImage()
@@ -402,6 +456,42 @@ struct CardTileView: View {
             let counts = await CardReplyService.fetchCounts(for: cardID)
             reactions = (try? await CardReplyService.fetchReactions(for: cardID)) ?? []
             replyCount = counts.replies
+        }
+    }
+
+    private func share() {
+        // The on-disk front/back are 300-DPI print renders — downscale to a
+        // digital size (same 1200px long edge as the email thumbnail path).
+        let sides: [(String, UIImage?)] = [("front", image ?? loadImage()), ("back", loadBackImage())]
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "ddMMMyy"
+        let dateString = formatter.string(from: Date())
+        // Share real JPEG files (named, with proper previews) rather than raw
+        // UIImages, and present straight from UIKit — a SwiftUI .sheet around
+        // UIActivityViewController came up blank.
+        let urls: [URL] = sides.compactMap { side, img in
+            guard let img, let data = Self.downscaledForSharing(img).jpegData(compressionQuality: 0.85) else { return nil }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("CardDrop-\(side)-\(dateString).jpg")
+            try? data.write(to: url, options: .atomic)
+            return url
+        }
+        guard !urls.isEmpty else { return }
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first { $0.activationState == .foregroundActive }
+        var top = scene?.keyWindow?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        top?.present(UIActivityViewController(activityItems: urls, applicationActivities: nil), animated: true)
+    }
+
+    private static func downscaledForSharing(_ image: UIImage, maxDimension: CGFloat = 1200) -> UIImage {
+        let long = max(image.size.width, image.size.height)
+        guard long > maxDimension else { return image }
+        let scale = maxDimension / long
+        let newSize = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
         }
     }
 }

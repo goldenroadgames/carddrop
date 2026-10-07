@@ -15,6 +15,14 @@ struct CardDropApp: App {
         registerCustomFonts()
         clearKeychainOnFreshInstall()
         StripeAPI.defaultPublishableKey = StripeConfig.publishableKey
+
+        // Semi-bold titles on every segmented picker (Sent/Drafts/Rings,
+        // Postcards/Profile, Canvas Setup). SwiftUI ignores .fontWeight on
+        // these, so it has to go through UIKit's appearance proxy. Delete
+        // this block to revert.
+        let segmentFont: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 13, weight: .semibold)]
+        UISegmentedControl.appearance().setTitleTextAttributes(segmentFont, for: .normal)
+        UISegmentedControl.appearance().setTitleTextAttributes(segmentFont, for: .selected)
     }
 
     var body: some Scene {
@@ -37,16 +45,6 @@ struct CardDropApp: App {
             // accessibility "Larger Text" setting — this app's layouts are pixel-tuned
             // and don't tolerate Dynamic Type scaling.
             .dynamicTypeSize(.large)
-            .onOpenURL { url in
-                Task {
-                    // User tapped the confirmation link in their email.
-                    // Set send_unlocked = true — this is what opens the send/IAP gates.
-                    try? await supabase.auth.session(from: url)
-                    try? await supabase.auth.update(
-                        user: UserAttributes(data: ["send_unlocked": .bool(true)])
-                    )
-                }
-            }
             .task(id: authManager.currentUserID) {
                 if let idString = authManager.currentUserID,
                    let id = UUID(uuidString: idString) {

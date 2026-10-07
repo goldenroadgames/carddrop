@@ -6,6 +6,10 @@ import CryptoKit
 
 class AuthManager: NSObject, ObservableObject {
     @Published var isAuthenticated = false
+
+    // Shown as an alert on the landing screen when starting a session fails
+    // (see AuthView). Cleared by the alert's OK button.
+    @Published var signInAlertMessage: String?
     @Published var isAnonymous = false
     @Published var isEmailVerified = false
     @Published var currentUserID: String?
@@ -51,7 +55,7 @@ class AuthManager: NSObject, ObservableObject {
                 self.isAuthenticated = session != nil
                 self.isAnonymous = session?.user.isAnonymous == true
                 self.isEmailVerified = session?.user.isAnonymous == false
-                    && session?.user.userMetadata["send_unlocked"] == .bool(true)
+                    && session?.user.isSendVerified == true
                 self.currentUserID = session?.user.id.uuidString
                 self.currentUserEmail = session?.user.email
 
@@ -152,6 +156,35 @@ class AuthManager: NSObject, ObservableObject {
         hasPermanentStorage = true
     }
 
+    /// Updates only the Profile tab's name/phone/address fields (users table) —
+    /// unlike saveProfile, does not touch the address book's .profile row.
+    func saveProfileAddress(firstName: String, lastName: String, phone: String, street: String,
+                            city: String, state: String, zip: String, country: String) {
+        guard let idString = currentUserID, let id = UUID(uuidString: idString) else { return }
+        self.firstName = firstName
+        self.lastName = lastName
+        profilePhone = phone
+        profileStreet = street
+        profileCity = city
+        profileState = state
+        profileZip = zip
+        profileCountry = country
+        Task {
+            let row: [String: AnyJSON] = [
+                "id":         .string(id.uuidString),
+                "first_name": .string(firstName),
+                "last_name":  .string(lastName),
+                "phone":      .string(phone),
+                "street":     .string(street),
+                "city":       .string(city),
+                "state":      .string(state),
+                "zip":        .string(zip),
+                "country":    .string(country)
+            ]
+            _ = try? await supabase.from("users").upsert(row, onConflict: "id").execute()
+        }
+    }
+
     func saveProfile(firstName: String, lastName: String = "", phone: String = "", street: String,
                      city: String, state: String, zip: String, country: String) {
         guard let idString = currentUserID, let id = UUID(uuidString: idString) else { return }
@@ -217,31 +250,6 @@ class AuthManager: NSObject, ObservableObject {
 
     // MARK: - Email
 
-    /// Sends (or resends) the confirmation email for the current user's email address.
-    /// Uses an Edge Function backed by the Admin API — more reliable than auth.resend()
-    /// which doesn't always route through custom SMTP.
-    func resendConfirmationEmail(to explicitEmail: String? = nil) {
-        guard let email = explicitEmail ?? currentUserEmail else { return }
-        Task {
-            do {
-                let _: Void = try await supabase.functions.invoke(
-                    "resend-confirmation",
-                    options: FunctionInvokeOptions(body: ["email": email])
-                )
-                print("✅ Resend confirmation sent to \(email)")
-            } catch {
-                print("❌ Resend confirmation failed: \(error)")
-            }
-        }
-    }
-
-    /// Updates the email address on the account. Supabase sends a confirmation to the new address.
-    /// The UUID and all associated content are unaffected.
-    func changeEmail(to newEmail: String) async throws {
-        try await supabase.auth.update(user: UserAttributes(email: newEmail))
-        await MainActor.run { currentUserEmail = newEmail }
-    }
-
     /// Refreshes the session from Supabase — picks up email verification done in a browser.
     func refreshSession() {
         Task {
@@ -278,26 +286,23 @@ class AuthManager: NSObject, ObservableObject {
         return try? await supabase.auth.session.user.id.uuidString
     }
 
-    /// Verifies the OTP code the user entered. On success sets send_unlocked = true.
+    /// Verifies the OTP code the user entered. The verify-email-otp function
+    /// checks the code and, if valid, marks the user verified server-side
+    /// (app_metadata.send_unlocked — users can't write it themselves), then
+    /// returns the verified user's session, which we adopt here.
     func verifyOTP(email: String, code: String) async throws {
-        try await supabase.auth.verifyOTP(email: email, token: code, type: .email)
-        try await supabase.auth.update(user: UserAttributes(data: ["send_unlocked": .bool(true)]))
-    }
-
-    /// Called when user taps "I've verified my email". Refreshes the session to
-    /// pick up send_unlocked if it was set via the email link on this device.
-    func unlockSendingIfVerified() {
-        Task {
-            try? await supabase.auth.refreshSession()
+        struct Tokens: Decodable {
+            let access_token: String
+            let refresh_token: String
         }
-    }
-
-    /// Call at feature gates that require a verified email.
-    /// Returns true if verified, triggers a resend and returns false if not.
-    func requireEmailVerification() -> Bool {
-        if isEmailVerified { return true }
-        resendConfirmationEmail()
-        return false
+        let tokens: Tokens = try await supabase.functions.invoke(
+            "verify-email-otp",
+            options: FunctionInvokeOptions(body: ["email": email, "code": code])
+        )
+        try await supabase.auth.setSession(
+            accessToken: tokens.access_token,
+            refreshToken: tokens.refresh_token
+        )
     }
 
     /// Sign in with Apple — links onto the current anonymous session via
@@ -309,7 +314,14 @@ class AuthManager: NSObject, ObservableObject {
         pendingAppleCompletion = onSuccess
         Task { @MainActor in
             if !isAnonymous {
-                try? await supabase.auth.signInAnonymously()
+                do {
+                    try await supabase.auth.signInAnonymously()
+                } catch {
+                    print("❌ signInAnonymously (for Apple sign-in) failed: \(error)")
+                    pendingAppleCompletion = nil
+                    signInAlertMessage = Self.signInFailureMessage(for: error)
+                    return
+                }
             }
 
             let nonce = Self.randomNonceString()
@@ -334,8 +346,29 @@ class AuthManager: NSObject, ObservableObject {
         return String(randomBytes.map { charset[Int($0) % charset.count] })
     }
 
+    /// Plain-language alert text for a failed attempt to start a session:
+    /// a distinct message when Supabase's rate limit (429) is what stopped it.
+    static func signInFailureMessage(for error: Error) -> String {
+        if case let .api(_, errorCode, _, response) = error as? AuthError,
+           errorCode == .overRequestRateLimit || response.statusCode == 429 {
+            return "CardDrop is busy right now. Please try again in a few minutes."
+        }
+        return "Couldn't connect to CardDrop. Check your internet connection and try again."
+    }
+
     private static func sha256(_ input: String) -> String {
         SHA256.hash(data: Data(input.utf8)).compactMap { String(format: "%02x", $0) }.joined()
+    }
+}
+
+// A user counts as verified if the verify-email-otp function marked them
+// (app_metadata is writable only server-side) or they signed in with Apple
+// (Supabase adds the identity only after validating Apple's token). Mirrors
+// isVerifiedUser() in the Edge Functions; user_metadata is NOT trusted.
+extension User {
+    var isSendVerified: Bool {
+        appMetadata["send_unlocked"] == .bool(true)
+            || (identities ?? []).contains { $0.provider == "apple" }
     }
 }
 
@@ -375,6 +408,7 @@ extension AuthManager: ASAuthorizationControllerDelegate, ASAuthorizationControl
                     try await supabase.auth.signInWithIdToken(credentials: credentials)
                 } catch {
                     print("❌ Sign in with Apple failed (both link and sign-in): \(error)")
+                    self.signInAlertMessage = Self.signInFailureMessage(for: error)
                     return
                 }
             }

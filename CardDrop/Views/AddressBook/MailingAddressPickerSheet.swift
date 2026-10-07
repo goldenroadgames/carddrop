@@ -36,6 +36,7 @@ struct MailingAddressPickerSheet: View {
 
     var body: some View {
         NavigationStack {
+            VStack(spacing: 0) {
             List {
                 if let loadError {
                     Section {
@@ -61,22 +62,42 @@ struct MailingAddressPickerSheet: View {
                         }
                     }
                 }
+            }
 
-                Section {
+            // Pinned below the scrolling list so these never go off screen.
+            VStack(spacing: 12) {
+                VStack(spacing: 0) {
                     Button {
                         showAddForm = true
                     } label: {
                         Label("Add New Address", systemImage: "plus")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
                     }
                     if role == .recipient {
+                        Divider().padding(.leading, 16)
                         Button {
                             showContactPicker = true
                         } label: {
                             Label("Choose from Contacts", systemImage: "person.crop.circle")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(16)
                         }
                     }
                 }
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 24))
+
+                Text("Edit or delete addresses in\nProfile › Saved Addresses")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.brandBlue)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+            }
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
             .navigationTitle(role == .sender ? "Select Sender" : "Select Recipient")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -84,7 +105,8 @@ struct MailingAddressPickerSheet: View {
             }
             .task { await load() }
             .sheet(isPresented: $showAddForm) {
-                MailingAddressFormView(existing: nil, defaultType: role == .sender ? .sender : .recipient) { saved in
+                MailingAddressFormView(existing: nil, defaultType: role == .sender ? .sender : .recipient,
+                                       hasDefaultSender: addresses.contains { $0.addressType == .profile }) { saved in
                     onSelect(saved)
                     dismiss()
                 }

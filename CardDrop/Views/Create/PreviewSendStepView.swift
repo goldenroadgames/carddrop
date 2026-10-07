@@ -59,6 +59,10 @@ struct SendOptionsView: View {
     @State private var showVerifyEmail = false
     @State private var limitPrompt: LimitPrompt? = nil
     @State private var showEmailRecipients = false
+    // False on iPhones with no account in Apple's Mail app — the Email row is
+    // hidden then (the Simulator always reports false, so it's exempted).
+    @State private var mailAvailable = MFMailComposeViewController.canSendMail()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var pendingEmailRecipients: [RecipientContact] = []
     @State private var showMessageRecipients = false
     @State private var pendingMessageRecipients: [RecipientContact] = []
@@ -252,9 +256,13 @@ struct SendOptionsView: View {
             }
             #endif
         .onAppear {
+            mailAvailable = MFMailComposeViewController.canSendMail()
             teaserImage       = freshFrontImage  ?? draftManager.loadFront(for: draft.cardID)
             backRenderImage   = freshBackImage   ?? draftManager.loadBack(for: draft.cardID)
             back6x9RenderImage = freshBack6x9Image ?? draftManager.loadBack6x9(for: draft.cardID)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { mailAvailable = MFMailComposeViewController.canSendMail() }
         }
         // bakeDraftArt() is fire-and-forget, so its render can still be
         // running when this view first appears (see freshBackImage doc
@@ -283,6 +291,9 @@ struct SendOptionsView: View {
             if let result = cardSendResult {
                 MailComposeView(
                     cardURL: result.cardURL,
+                    thumbnailURL: authManager.currentUserID.flatMap {
+                        URL(string: "\(Secrets.supabaseURL)/storage/v1/object/public/card-images/\($0.lowercased())/\(result.cardID.uuidString.lowercased())_thumb.jpg")
+                    },
                     recipientEmails: pendingEmailRecipients.map(\.value),
                     cardID: result.cardID,
                     senderNickname: draft.senderNickname.isEmpty ? nil : draft.senderNickname,
@@ -462,15 +473,17 @@ struct SendOptionsView: View {
                     .padding(.horizontal, 16)
 
                 VStack(spacing: 0) {
-                    sendRow(
-                        icon: "envelope",
-                        title: "Email",
-                        subtitle: "Send as an interactive postcard",
-                        color: .blue
-                    ) { sendEmail() }
-                    .padding(.horizontal, 16)
+                    if mailAvailable || isRunningInSimulator {
+                        sendRow(
+                            icon: "envelope",
+                            title: "Email",
+                            subtitle: "Send as an interactive postcard",
+                            color: .blue
+                        ) { sendEmail() }
+                        .padding(.horizontal, 16)
 
-                    Divider().padding(.leading, 66)
+                        Divider().padding(.leading, 66)
+                    }
 
                     sendRow(
                         icon: "message",
@@ -664,7 +677,7 @@ struct SendOptionsView: View {
         Task { @MainActor in
             do {
                 try await CardUploadService.checkSendLimits()
-                showEmailRecipients = true
+                performEmailSend(entries: [])
             } catch let error as CardUploadService.UploadError {
                 setLimitPrompt(for: error)
             } catch {}
@@ -702,6 +715,7 @@ struct SendOptionsView: View {
     }
 
     private func insertEmailRecipients(entries: [RecipientContact], cardID: UUID) async {
+        if entries.isEmpty { await insertSendLog(method: "email", cardID: cardID); return }
         struct Row: Encodable {
             let card_id: String
             let email: String
@@ -779,7 +793,7 @@ struct SendOptionsView: View {
         Task { @MainActor in
             do {
                 try await CardUploadService.checkSendLimits()
-                showMessageRecipients = true
+                performTextSend(entries: [])
             } catch let error as CardUploadService.UploadError {
                 setLimitPrompt(for: error)
             } catch {}
@@ -806,7 +820,24 @@ struct SendOptionsView: View {
         }
     }
 
+    /// The native Mail/Messages composers don't report who a card was sent to,
+    /// so with no recipients collected up front the log row records only the
+    /// method, time (created_at) and the To-field nickname, if any.
+    private func insertSendLog(method: String, cardID: UUID) async {
+        struct Row: Encodable {
+            let card_id: String
+            let nickname: String?
+            let send_method: String
+        }
+        let nickname = draft.recipientNickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        let row = Row(card_id: cardID.uuidString,
+                      nickname: nickname.isEmpty ? nil : nickname,
+                      send_method: method)
+        try? await supabase.from("card_recipients").insert(row).execute()
+    }
+
     private func insertMessageRecipients(entries: [RecipientContact], cardID: UUID) async {
+        if entries.isEmpty { await insertSendLog(method: "text", cardID: cardID); return }
         struct Row: Encodable {
             let card_id: String
             let email: String?
@@ -1010,6 +1041,8 @@ struct SendOptionsView: View {
 
 struct MailComposeView: UIViewControllerRepresentable {
     var cardURL: URL
+    /// Public 600px front thumbnail (card-images/.../{cardID}_thumb.jpg).
+    var thumbnailURL: URL? = nil
     var recipientEmails: [String]
     var cardID: UUID
     var senderNickname: String?
@@ -1025,9 +1058,13 @@ struct MailComposeView: UIViewControllerRepresentable {
         vc.setSubject("\(from) sent a CardDrop")
 
         let url = cardURL.absoluteString
+        let imageHTML = thumbnailURL.map {
+            "<p style=\"margin:0 0 14px;\"><a href=\"\(url)\"><img src=\"\($0.absoluteString)\" alt=\"Your CardDrop\" style=\"width:100%;max-width:600px;height:auto;border-radius:10px;border:0;\"></a></p>"
+        } ?? ""
         let html = """
         <html>
         <body style="font-family:-apple-system,Helvetica,sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#222;text-align:center;">
+        \(imageHTML)
         <p style="font-size:15px;margin:0 0 12px;">Tap to open it</p>
         <p style="font-size:14px;margin:0;"><a href="\(url)" style="color:#0066FF;">\(url)</a></p>
         </body>
@@ -1076,7 +1113,7 @@ struct MessageComposeView: UIViewControllerRepresentable {
         vc.messageComposeDelegate = context.coordinator
         if !recipients.isEmpty { vc.recipients = recipients }
         let from = senderNickname?.isEmpty == false ? senderNickname! : "You"
-        vc.body = "\(from) sent a CardDrop\nTap to open it.\n\n\n\(cardURL.absoluteString)"
+        vc.body = "\(from) sent a CardDrop\nTap to open it.\n\(cardURL.absoluteString)"
         if let img = teaserImage {
             let thumbnail = PostcardHTMLGenerator.scaledForThumbnail(img)
             if let data = thumbnail.jpegData(compressionQuality: 0.7) {

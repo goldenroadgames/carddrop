@@ -9,7 +9,7 @@ struct PostcardHTMLGenerator {
     // Deliberately much smaller than a full-size image — this is just a small
     // in-thread thumbnail; most recipients will see the full-size image via
     // the URL's own rich link preview instead.
-    static func scaledForThumbnail(_ image: UIImage) -> UIImage { downscale(image, maxDimension: 300) }
+    static func scaledForThumbnail(_ image: UIImage) -> UIImage { downscale(image, maxDimension: 150) }
 
     private static func downscale(_ image: UIImage, maxDimension: CGFloat = 1200) -> UIImage {
         let size = image.size

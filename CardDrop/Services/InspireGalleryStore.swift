@@ -63,17 +63,10 @@ final class InspireGalleryStore: ObservableObject {
         let from = page * pageSize
         let to = from + pageSize - 1
 
-        var query = supabase
+        return (try? await supabase
             .from("marketing_cards")
             .select("card_id, sender_id, is_portrait, design_features, added_to_marketing_at")
             .eq("in_inspire", value: true)
-
-        // Never show someone their own sent card in their own Inspire feed.
-        if let userID = try? await supabase.auth.session.user.id {
-            query = query.neq("sender_id", value: userID.uuidString)
-        }
-
-        return (try? await query
             .order("added_to_marketing_at", ascending: false)
             .range(from: from, to: to)
             .execute()
