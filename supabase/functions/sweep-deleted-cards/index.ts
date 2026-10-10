@@ -2,16 +2,20 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { purgeCard } from "../_shared/purgeCard.ts";
 
 // Scheduled job: finishes deletes that failed partway (deleted_at set,
-// purged_at null). Called on a schedule (Supabase Cron) with the service role
-// key; rejects anything else. Later steps of the plan add expiry and
-// retention scrubs here.
+// purged_at null) and runs the 12-month retention scrubs. Called by Supabase
+// Cron (pg_net) with an x-cron-secret header matching the CRON_SECRET secret.
+// Deploy with --no-verify-jwt (the cron call carries no JWT); the shared
+// secret is the only gate, so anything without it is rejected.
 Deno.serve(async (req) => {
   try {
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const authHeader = req.headers.get("Authorization");
-    if (authHeader !== `Bearer ${serviceKey}`) return json({ error: "unauthorized" }, 401);
+    const cronSecret = Deno.env.get("CRON_SECRET");
+    const given = req.headers.get("x-cron-secret");
+    if (!cronSecret || !given || given !== cronSecret) return json({ error: "unauthorized" }, 401);
 
-    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, serviceKey);
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
 
     const { data: pending, error } = await supabase
       .from("cards")
