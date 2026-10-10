@@ -12,6 +12,10 @@ struct PostcardsView: View {
     @State private var showOTPVerification = false
     @State private var showSignInGate = false
     @State private var deleteTargetID: UUID? = nil
+    @State private var showDeleteFailed = false
+    @State private var noticeTitle = ""
+    @State private var noticeMessage = ""
+    @State private var showNotice = false
     @State private var repliesPanelSnapshot: PostcardDraftSnapshot? = nil
     @State private var showRepliesPanel = false
     @State private var sentDetailSnapshot: PostcardDraftSnapshot? = nil
@@ -177,11 +181,26 @@ struct PostcardsView: View {
             set: { if !$0 { deleteTargetID = nil } }
         )) {
             Button("Delete", role: .destructive) {
-                if let id = deleteTargetID {
-                    let cardID = draftManager.drafts.first(where: { $0.id == id })?.cardID
-                    draftManager.delete(id)
-                    if let cardID {
-                        Task { await CardDeleteService.delete(cardID: cardID) }
+                if let id = deleteTargetID,
+                   let snapshot = draftManager.drafts.first(where: { $0.id == id }) {
+                    if snapshot.status == .sent, let cardID = snapshot.cardID {
+                        // Sent card: the shared link stays live until the server
+                        // confirms, so keep the local copy until then.
+                        Task {
+                            if await CardDeleteService.delete(cardID: cardID) {
+                                draftManager.delete(id)
+                            } else {
+                                showDeleteFailed = true
+                            }
+                        }
+                    } else {
+                        // Draft: delete locally right away; clean up any partial
+                        // server upload in the background.
+                        let cardID = snapshot.cardID
+                        draftManager.delete(id)
+                        if let cardID {
+                            Task { _ = await CardDeleteService.delete(cardID: cardID) }
+                        }
                     }
                 }
                 deleteTargetID = nil
@@ -190,6 +209,30 @@ struct PostcardsView: View {
         } message: {
             Text("This permanently deletes the card, all replies, and the shared link. Cannot be undone.")
         }
+        .alert("Couldn't Delete Card", isPresented: $showDeleteFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Check your connection and try again. The card and its shared link are still active.")
+        }
+        .alert(noticeTitle, isPresented: $showNotice) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(noticeMessage)
+        }
+        .task { await showPendingNotice() }
+    }
+
+    // MARK: - Notices
+
+    // Complaint warnings / suspension notices written by the server. Shows the
+    // newest unseen one (most recent is the most relevant) and marks all seen.
+    private func showPendingNotice() async {
+        let notices = await UserNoticeService.fetchUnseen()
+        guard let latest = notices.last else { return }
+        noticeTitle = latest.kind == "ban" ? "Account Suspended" : "Card Reported"
+        noticeMessage = latest.message
+        showNotice = true
+        await UserNoticeService.markSeen(notices)
     }
 
     // MARK: - Actions

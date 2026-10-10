@@ -11,6 +11,7 @@ class AuthManager: NSObject, ObservableObject {
     // (see AuthView). Cleared by the alert's OK button.
     @Published var signInAlertMessage: String?
     @Published var isAnonymous = false
+    @Published var isAppleAccount = false
     @Published var isEmailVerified = false
     @Published var currentUserID: String?
     @Published var currentUserEmail: String?
@@ -39,6 +40,9 @@ class AuthManager: NSObject, ObservableObject {
     // callbacks (which can't carry async context) back to the async link flow.
     private var currentAppleNonce: String?
     private var pendingAppleCompletion: (() -> Void)?
+    // Set while asking Apple for a fresh authorization code for account deletion
+    // (so the server can revoke the Sign in with Apple grant).
+    private var pendingAppleDeletionCompletion: ((String?) -> Void)?
 
     override init() {
         super.init()
@@ -54,6 +58,7 @@ class AuthManager: NSObject, ObservableObject {
                 let session = (rawSession?.isExpired == true) ? nil : rawSession
                 self.isAuthenticated = session != nil
                 self.isAnonymous = session?.user.isAnonymous == true
+                self.isAppleAccount = (session?.user.identities ?? []).contains { $0.provider == "apple" }
                 self.isEmailVerified = session?.user.isAnonymous == false
                     && session?.user.isSendVerified == true
                 self.currentUserID = session?.user.id.uuidString
@@ -338,6 +343,20 @@ class AuthManager: NSObject, ObservableObject {
         }
     }
 
+    /// Asks Apple for a fresh authorization code (account deletion only). nil if
+    /// the user cancels or Apple fails.
+    @MainActor
+    func requestAppleAuthorizationCode() async -> String? {
+        await withCheckedContinuation { continuation in
+            pendingAppleDeletionCompletion = { continuation.resume(returning: $0) }
+            let request = ASAuthorizationAppleIDProvider().createRequest()
+            let controller = ASAuthorizationController(authorizationRequests: [request])
+            controller.delegate = self
+            controller.presentationContextProvider = self
+            controller.performRequests()
+        }
+    }
+
     private static func randomNonceString(length: Int = 32) -> String {
         var randomBytes = [UInt8](repeating: 0, count: length)
         let status = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
@@ -377,6 +396,14 @@ extension User {
 extension AuthManager: ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        if let done = pendingAppleDeletionCompletion {
+            pendingAppleDeletionCompletion = nil
+            let code = (authorization.credential as? ASAuthorizationAppleIDCredential)?
+                .authorizationCode
+                .flatMap { String(data: $0, encoding: .utf8) }
+            done(code)
+            return
+        }
         guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
               let tokenData = credential.identityToken,
               let idToken = String(data: tokenData, encoding: .utf8),
@@ -423,6 +450,11 @@ extension AuthManager: ASAuthorizationControllerDelegate, ASAuthorizationControl
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        if let done = pendingAppleDeletionCompletion {
+            pendingAppleDeletionCompletion = nil
+            done(nil)
+            return
+        }
         currentAppleNonce = nil
         pendingAppleCompletion = nil
         if let authError = error as? ASAuthorizationError, authError.code == .canceled {

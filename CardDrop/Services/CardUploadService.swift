@@ -170,11 +170,21 @@ enum CardUploadService {
         }
         let senderID = sender.id.uuidString.lowercased()
 
+        // The on-disk front/back are 300-DPI print renders. The web page,
+        // thumbnail and in-app views only need a web-size copy, so downscale
+        // before upload (the thumbnail below is still derived from the
+        // full-size front for quality). Print orders use their own separate
+        // `_forLOB` files, not these; the full-size front is also kept as
+        // `_full.jpg` below.
+        let webFrontData = webSizedJPEG(frontData)
+        let webBackData = webSizedJPEG(backData)
+        let webBack6x9Data = back6x9Data.map { webSizedJPEG($0) }
+
         try await supabase.storage
             .from("card-images")
             .upload(
                 "\(senderID)/\(idStr).jpg",
-                data: frontData,
+                data: webFrontData,
                 options: FileOptions(contentType: "image/jpeg", upsert: true)
             )
 
@@ -182,7 +192,18 @@ enum CardUploadService {
             .from("card-images")
             .upload(
                 "\(senderID)/\(idStr)_back.jpg",
-                data: backData,
+                data: webBackData,
+                options: FileOptions(contentType: "image/jpeg", upsert: true)
+            )
+
+        // Full print-scale front, kept alongside the web-size copy above for
+        // marketing print use. The admin marketing tool copies it across; no
+        // app or web view loads it.
+        try await supabase.storage
+            .from("card-images")
+            .upload(
+                "\(senderID)/\(idStr)_full.jpg",
+                data: frontData,
                 options: FileOptions(contentType: "image/jpeg", upsert: true)
             )
 
@@ -196,7 +217,7 @@ enum CardUploadService {
                 )
         }
 
-        if let back6x9Data {
+        if let back6x9Data = webBack6x9Data {
             try await supabase.storage
                 .from("card-images")
                 .upload(
@@ -213,6 +234,18 @@ enum CardUploadService {
         // thumbnail of it for the Inspire grid tiles — same idea as the
         // front's own _thumb.jpg, so the grid isn't loading full-res images.
         if let beforeImage {
+            // Full-resolution original, kept for marketing print use (same
+            // role as `_full.jpg` for the front). Nothing in the app or web
+            // loads it.
+            if let beforeFullData = beforeImage.jpegData(compressionQuality: 0.85) {
+                try await supabase.storage
+                    .from("card-images")
+                    .upload(
+                        "\(senderID)/\(idStr)_before_full.jpg",
+                        data: beforeFullData,
+                        options: FileOptions(contentType: "image/jpeg", upsert: true)
+                    )
+            }
             if let beforeData = resizedJPEG(from: beforeImage, maxDimension: 1500, quality: 0.75) {
                 try await supabase.storage
                     .from("card-images")
@@ -234,6 +267,21 @@ enum CardUploadService {
         }
     }
 
+    // MARK: - Web-size scaling
+
+    /// Long edge, in pixels, of the web-size copies uploaded for the webapp's
+    /// /card page and in-app views.
+    private static let webMaxDimension: CGFloat = 1600
+
+    /// Downscales a full-size card render to `webMaxDimension` as a JPEG.
+    /// Falls back to the original data if it can't be decoded, so an upload
+    /// never fails just because of the resize.
+    private static func webSizedJPEG(_ data: Data) -> Data {
+        guard let image = UIImage(data: data),
+              let resized = resizedJPEG(from: image, maxDimension: webMaxDimension, quality: 0.8) else { return data }
+        return resized
+    }
+
     // MARK: - Admin thumbnail / before-photo scaling
 
     /// Downscales `image` to `maxDimension` on its long edge and re-encodes
@@ -246,7 +294,12 @@ enum CardUploadService {
         let scale = min(1, maxDimension / longEdge)
         let targetSize = CGSize(width: image.size.width * scale, height: image.size.height * scale)
 
-        let renderer = UIGraphicsImageRenderer(size: targetSize)
+        // scale = 1 so targetSize is real pixels — the default format uses the
+        // device's screen scale (2-3x), which would silently multiply the
+        // output dimensions.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
         let resized = renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: targetSize))
         }

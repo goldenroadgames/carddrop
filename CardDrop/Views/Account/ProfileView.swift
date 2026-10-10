@@ -51,10 +51,23 @@ struct ProfileView: View {
                 Section {
                     Text("Notifications")
                     if !authManager.isAnonymous {
-                        Toggle("Feature my cards in marketing", isOn: Binding(
-                            get: { authManager.allowMarketingUse },
-                            set: { authManager.setAllowMarketingUse($0) }
-                        ))
+                        Button {
+                            authManager.setAllowMarketingUse(!authManager.allowMarketingUse)
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: authManager.allowMarketingUse ? "checkmark.square" : "square")
+                                    .font(.system(size: 22))
+                                    .foregroundStyle(.primary)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Allow limited marketing use of my cards")
+                                        .foregroundStyle(.primary)
+                                    Text("See the Terms of Service and Privacy Policy below.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
                     NavigationLink {
                         LegalDocumentView(title: "Terms of Service", document: .termsOfService)
@@ -71,6 +84,9 @@ struct ProfileView: View {
                         Text("Settings")
                             .font(.system(size: 13, weight: .regular))
                         Spacer()
+                        // Also up in the Email header for signed-in users;
+                        // anonymous users have no Email section, so this is
+                        // theirs.
                         Button("Sign Out") {
                             showSignOutConfirmation = true
                         }
@@ -82,6 +98,10 @@ struct ProfileView: View {
                     if !authManager.isAnonymous {
                         Text("Turning this off only affects cards you create going forward — any already selected for marketing stay in use.")
                     }
+                }
+
+                Section {
+                    DeleteAccountButton()
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -249,9 +269,17 @@ struct ProfileView: View {
                 }
             }
         } header: {
-            Text("Email")
+            HStack {
+                Text("Email")
+                    .font(.system(size: 13, weight: .regular))
+                Spacer()
+                Button("Sign Out") {
+                    showSignOutConfirmation = true
+                }
                 .font(.system(size: 13, weight: .regular))
-                .textCase(.none)
+                .foregroundColor(.red)
+            }
+            .textCase(.none)
         }
     }
 

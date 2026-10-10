@@ -1,4 +1,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { isBanned } from "../_shared/bans.ts";
+import { addressHash } from "../_shared/addressKey.ts";
 
 // Creates a physical_orders row (status: pending_payment) for a card being
 // mailed via LOB, then creates a matching Stripe PaymentIntent for the
@@ -36,6 +38,11 @@ Deno.serve(async (req) => {
       return json({ error: "email_not_verified" }, 403);
     }
 
+    // Banned accounts (or accounts with a banned device) can't buy mail either.
+    if (await isBanned(supabase, user, true)) {
+      return json({ error: "suspended" }, 403);
+    }
+
     const { cardID, senderAddressID, recipientAddressID, size, promoCode } = await req.json();
     if (!cardID) return json({ error: "cardID required" }, 400);
     if (!senderAddressID) return json({ error: "senderAddressID required" }, 400);
@@ -63,6 +70,22 @@ Deno.serve(async (req) => {
     if (recipientError || !recipient) return json({ error: "recipient_address_not_found" }, 404);
     if (recipient.user_id !== user.id) return json({ error: "unauthorized" }, 403);
 
+    // Recipient has asked not to receive mail from this sender (or from
+    // anyone) after reporting a card. Deliberately neutral wording.
+    const recipientHash = await addressHash(recipient.street, recipient.zip);
+    if (recipientHash) {
+      const { data: blocked } = await supabase
+        .from("mail_blocks")
+        .select("id")
+        .eq("address_hash", recipientHash)
+        .or(`sender_id.is.null,sender_id.eq.${user.id}`)
+        .limit(1)
+        .maybeSingle();
+      if (blocked) {
+        return json({ error: "mail_unavailable", detail: "This postcard couldn't be sent to that address." }, 403);
+      }
+    }
+
     // ----------------------------------------------------------------
     // Current price for the size.
     // ----------------------------------------------------------------
@@ -85,7 +108,55 @@ Deno.serve(async (req) => {
     let discountCents = 0;
     let isFreeOrder = false;
 
-    if (promoCode) {
+    // ----------------------------------------------------------------
+    // Account allowance (friends & family, migration 048): checked first. If
+    // the account has free postcards left this month, the order is free and
+    // any promo code is ignored (so it isn't burned). Usage is counted from
+    // physical_orders, not stored — see the migration header.
+    // ----------------------------------------------------------------
+    let fundedByAllowance = false;
+    {
+      // Matched by the caller's VERIFIED email (migration 052), never by
+      // user id: a confirmed email, or an Apple identity (Apple verified it).
+      const emailIsVerified = !!user.email &&
+        (!!user.email_confirmed_at || (user.identities ?? []).some((i: { provider: string }) => i.provider === "apple"));
+      const { data: allowance, error: allowanceError } = !emailIsVerified
+        ? { data: null, error: null }
+        : await supabase
+          .from("zz_account_allowances")
+          .select("free_postcards_per_month, expires_on")
+          .eq("email", user.email!.toLowerCase())
+          .maybeSingle();
+      if (allowanceError) {
+        console.error("allowance lookup error:", allowanceError);
+        return json({ error: "allowance_lookup_failed" }, 500);
+      }
+      // expires_on is the last valid day (inclusive, UTC date); null = never.
+      const allowanceExpired = !!allowance?.expires_on &&
+        allowance.expires_on < new Date().toISOString().slice(0, 10);
+      if (allowance && !allowanceExpired) {
+        const now = new Date();
+        const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+        const { count, error: countError } = await supabase
+          .from("physical_orders")
+          .select("id", { count: "exact", head: true })
+          .eq("sender_id", user.id)
+          .eq("funded_by_allowance", true)
+          .not("status", "in", "(failed,refunded)")
+          .gte("created_at", monthStart);
+        if (countError) {
+          console.error("allowance usage count error:", countError);
+          return json({ error: "allowance_lookup_failed" }, 500);
+        }
+        if ((count ?? 0) < allowance.free_postcards_per_month) {
+          fundedByAllowance = true;
+          isFreeOrder = true;
+          discountCents = pricing.amount_cents;
+        }
+      }
+    }
+
+    if (promoCode && !fundedByAllowance) {
       const { data: promo, error: promoError } = await supabase
         .from("zz_promo_codes")
         .select("id, discount_type, discount_value, applicable_sizes, max_redemptions, per_user_limit, starts_at, expires_at, is_active, is_free, restricted, allowed_email_domains")
@@ -202,6 +273,7 @@ Deno.serve(async (req) => {
         status: isFreeOrder ? "authorized" : "pending_payment",
         promo_code_id: promoCodeID,
         discount_cents: discountCents,
+        funded_by_allowance: fundedByAllowance,
       })
       .select("id")
       .single();
@@ -218,7 +290,8 @@ Deno.serve(async (req) => {
     // card, so a failed attempt doesn't burn a limited code.
     // ----------------------------------------------------------------
     if (isFreeOrder) {
-      const { error: redemptionError } = await supabase
+      // Allowance-funded orders have no promo code, so no redemption row.
+      const { error: redemptionError } = fundedByAllowance ? { error: null } : await supabase
         .from("promo_code_redemptions")
         .insert({
           promo_code_id: promoCodeID,

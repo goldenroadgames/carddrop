@@ -10,6 +10,8 @@ struct CardDropApp: App {
     @StateObject private var draftManager = DraftManager()
     @StateObject private var appSettings = AppSettings()
     @State private var didSkipAuth = false
+    @State private var isSuspended = false
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         registerCustomFonts()
@@ -28,7 +30,12 @@ struct CardDropApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if authManager.isAuthenticated && (!authManager.isAnonymous || didSkipAuth) {
+                if isSuspended {
+                    SuspendedView()
+                        .environmentObject(authManager)
+                        .environmentObject(draftManager)
+                        .environmentObject(addressBook)
+                } else if authManager.isAuthenticated && (!authManager.isAnonymous || didSkipAuth) {
                     MainTabView()
                         .environmentObject(authManager)
                         .environmentObject(addressBook)
@@ -45,6 +52,16 @@ struct CardDropApp: App {
             // accessibility "Larger Text" setting — this app's layouts are pixel-tuned
             // and don't tolerate Dynamic Type scaling.
             .dynamicTypeSize(.large)
+            // A suspension can land while the app is backgrounded (the 3rd complaint),
+            // so recheck whenever it comes back to the foreground.
+            .onChange(of: scenePhase) {
+                guard scenePhase == .active else { return }
+                Task {
+                    if let suspended = await SuspensionService.isSuspended() {
+                        isSuspended = suspended
+                    }
+                }
+            }
             .task(id: authManager.currentUserID) {
                 if let idString = authManager.currentUserID,
                    let id = UUID(uuidString: idString) {
@@ -63,6 +80,9 @@ struct CardDropApp: App {
                     }
                     if !authManager.isAnonymous && !authManager.isEmailVerified {
                         await authManager.refreshSessionAsync()
+                    }
+                    if let suspended = await SuspensionService.isSuspended() {
+                        isSuspended = suspended
                     }
                 } else {
                     draftManager.clearUser()

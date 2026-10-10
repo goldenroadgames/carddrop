@@ -20,6 +20,7 @@ enum CardRestoreService {
             .from("cards")
             .select("id, recipient_first_name, recipient_last_name, sent_at, is_portrait")
             .eq("sender_id", value: userID)
+            .filter("deleted_at", operator: "is", value: "null")   // skip deleted-card tombstones
             .order("sent_at", ascending: false)
             .execute()
             .value as [ServerCard]

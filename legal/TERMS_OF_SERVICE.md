@@ -29,6 +29,7 @@ You are responsible for maintaining the confidentiality of your account credenti
 - **License to us.** You grant us a limited, non-exclusive, worldwide license to host, store, process, reproduce, and transmit Your Content solely as necessary to operate the Service — for example, to render your card, generate a shareable link, or send your design to our Print Partner for printing and mailing.
 - **Marketing use.** You grant us a limited, non-exclusive, worldwide license to select, reproduce, and publicly display the visual design of cards you create, and the original photos you used to create them (photos, artwork, and layout — not recipient mailing addresses or contact information), in our own marketing and promotional materials, such as our website, app store listings, social media, advertising, and example galleries shown inside the app (including side-by-side "before and after" comparisons of your original photo and your finished card).
   - Registered users can opt out at any time in Settings. When you opt out, we will not select cards from your account from that date forward; we may continue to feature cards we featured before that date.
+  - If you delete a card or your account, we will remove it from our servers, but any copy already featured in our marketing and promotional materials, including example galleries shown inside the app, may remain.
   - See our Privacy Policy for more detail on this feature.
 - **Your responsibility.** You represent that you own or have the necessary rights to any photo, image, or content you upload, and that Your Content does not infringe any third party's rights.
 - **Recipient information.** If you submit another person's name, address, phone number, or email address to send them a card, you represent that you have their permission to do so and that you are not using the Service to harass, spam, or contact anyone against their wishes.
@@ -46,9 +47,11 @@ You agree not to use the Service to:
 
 We reserve the right to review, remove, or refuse to process any content submitted for printing, and to suspend or terminate accounts that violate this section, at our discretion.
 
+**Reports from recipients.** Anyone who receives a card can report it. If a recipient reports a card you sent, you will be warned and you will no longer be able to mail to that recipient's address; if you are reported repeatedly, we will suspend your account and the devices you use, without further notice. Digital cards are sent from your own device through your own messaging and email apps, not by us, and you are solely responsible for the cards you send and the recipients you choose.
+
 ## 7. Physical Fulfillment and Delivery
 
-Physical postcards are printed and mailed by our third-party Print Partner. We are not responsible for postal delivery delays, non-delivery, or damage that occurs once an order enters the mail stream. Estimated delivery windows shown in the app are estimates only and are not guaranteed. You are responsible for entering accurate recipient addresses; we are not liable for cards misdelivered due to incorrect address information you provided.
+Physical postcards are printed and mailed by our third-party Print Partner. We are not responsible for postal delivery delays, non-delivery, or damage that occurs once an order enters the mail stream. Estimated delivery windows shown in the app are estimates only and are not guaranteed. You are responsible for entering accurate recipient addresses; we are not liable for cards misdelivered due to incorrect address information you provided. If a recipient has asked not to receive mail from you, or from CardDrop, we will decline to print and mail to that address, and you will not be charged.
 
 ## 8. Third-Party Services
 
@@ -60,7 +63,7 @@ The Service itself, including its software, design, branding, and content we cre
 
 ## 10. Termination
 
-You may stop using the Service or delete your account at any time. We may suspend or terminate your access to the Service if you violate these Terms, at our discretion, with or without notice. Sections of these Terms that by their nature should survive termination (including Sections 5, 9, 11, and 12) will survive.
+You may stop using the Service or delete your account at any time. We may suspend or terminate your access to the Service if you violate these Terms or are reported repeatedly by recipients, at our discretion, with or without notice. We may, but are not required to, review a suspension or restore an account; you can contact support at the address below. We may keep a record of a suspension, including a verified email address, so that a suspended person cannot create a new account. Sections of these Terms that by their nature should survive termination (including Sections 5, 9, 11, and 12) will survive.
 
 ## 11. Disclaimers and Limitation of Liability
 

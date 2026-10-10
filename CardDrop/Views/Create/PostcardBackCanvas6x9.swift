@@ -320,6 +320,11 @@ private struct BrandingBand6x9: View {
         let wordmarkSize: CGFloat = 132
         let onTheSize:    CGFloat = 72
         let lineGap:      CGFloat = 36
+        // Display-only tweaks for the tagline: bigger so it spans the same
+        // width as the wordmark, and dropped a bit. onTheSize/lineGap above
+        // still drive textBlockHeight so nothing else in the band moves.
+        let onTheFontSize: CGFloat = 88
+        let onTheDrop:     CGFloat = 14
 
         let wordmarkLineHeight = UIFont.systemFont(ofSize: wordmarkSize, weight: .bold).lineHeight
         let onTheLineHeight    = UIFont.systemFont(ofSize: onTheSize, weight: .bold).lineHeight
@@ -353,9 +358,9 @@ private struct BrandingBand6x9: View {
                 .padding(.top, -10)
 
                 Text("On.The.\(Text("FRIDGE.").fontWeight(.bold))")
-                .font(.system(size: onTheSize, weight: .medium))
+                .font(.system(size: onTheFontSize, weight: .medium))
                 .foregroundColor(.white)
-                .padding(.top, lineGap)
+                .padding(.top, lineGap + onTheDrop)
             }
             .frame(width: textBlockWidth, height: textBlockHeight, alignment: .top)
             .offset(x: textBlockX + 40, y: textBlockY - 60 + 20)

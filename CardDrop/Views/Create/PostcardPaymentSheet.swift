@@ -33,12 +33,19 @@ struct PostcardPaymentSheet: View {
 
     private var currency: String { price.currency }
 
+    /// Free-postcard allowance (friends & family). Display only — when it
+    /// applies the server makes the order free and ignores any promo code.
+    @State private var allowance: PostcardAllowance?
+    private var allowanceApplies: Bool { (allowance?.remaining ?? 0) > 0 }
+
     private var subtotalCents: Int { price.amountCents }
     private var discountCents: Int {
-        (appliedPromo?.valid == true) ? (appliedPromo?.discountCents ?? 0) : 0
+        if allowanceApplies { return subtotalCents }
+        return (appliedPromo?.valid == true) ? (appliedPromo?.discountCents ?? 0) : 0
     }
     private var totalCents: Int {
-        (appliedPromo?.valid == true) ? (appliedPromo?.finalAmountCents ?? subtotalCents) : subtotalCents
+        if allowanceApplies { return 0 }
+        return (appliedPromo?.valid == true) ? (appliedPromo?.finalAmountCents ?? subtotalCents) : subtotalCents
     }
 
     private func formatted(_ cents: Int) -> String {
@@ -55,7 +62,13 @@ struct PostcardPaymentSheet: View {
                 List {
                     Section("Order") {
                         summaryRow(label: price.size == .fourBySix ? "4x6 Postcard" : "6x9 Postcard", value: formatted(subtotalCents))
-                        if discountCents > 0 {
+                        if allowanceApplies, let allowance {
+                            summaryRow(
+                                label: "Free postcard (\(allowance.remaining) of \(allowance.limit) left this month)",
+                                value: "-\(formatted(discountCents))"
+                            )
+                            .foregroundColor(.brandBlue)
+                        } else if discountCents > 0 {
                             summaryRow(label: "Promo Discount", value: "-\(formatted(discountCents))")
                                 .foregroundColor(.brandBlue)
                         }
@@ -63,6 +76,7 @@ struct PostcardPaymentSheet: View {
                             .fontWeight(.semibold)
                     }
 
+                    if !allowanceApplies {
                     Section("Promo Code") {
                         HStack {
                             TextField("Enter code", text: $promoCodeText)
@@ -102,6 +116,7 @@ struct PostcardPaymentSheet: View {
                                 .foregroundColor(appliedPromo?.valid == true ? .brandBlue : .red)
                         }
                     }
+                    }
 
                     if let intentErrorMessage {
                         Section {
@@ -137,6 +152,7 @@ struct PostcardPaymentSheet: View {
             }
         }
         .dynamicTypeSize(.medium ... .xxxLarge)
+        .task { allowance = await PostcardOrderService.fetchAllowance() }
     }
 
     @ViewBuilder

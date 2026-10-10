@@ -35,6 +35,15 @@ struct PromoCodeValidation: Decodable {
     }
 }
 
+/// Free-postcard allowance for the signed-in account (friends & family) —
+/// display only; the server applies it again when the order is created.
+struct PostcardAllowance: Decodable {
+    let hasAllowance: Bool
+    let limit: Int
+    let used: Int
+    let remaining: Int
+}
+
 /// Result of creating the physical_orders row + Stripe PaymentIntent — the
 /// clientSecret is what StripePaymentSheet needs to actually collect payment.
 struct PostcardPaymentIntent: Decodable {
@@ -90,6 +99,12 @@ enum PostcardOrderService {
         } catch {
             throw PostcardOrderServiceError.other(error.localizedDescription)
         }
+    }
+
+    /// Calls get-postcard-allowance. Returns nil on any failure — the sheet
+    /// then simply shows the normal price (the server decides at order time).
+    static func fetchAllowance() async -> PostcardAllowance? {
+        try? await supabase.functions.invoke("get-postcard-allowance")
     }
 
     private struct CreatePaymentIntentRequestBody: Encodable {

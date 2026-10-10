@@ -7,6 +7,9 @@ import SwiftUI
 /// comes after; `onContinue` hands back the two chosen addresses plus the
 /// selected price option.
 struct PostcardAddressStepView: View {
+    /// Free-postcard allowance (friends & family), display only — the server
+    /// applies it when the order is created. Either size is covered.
+    var allowance: PostcardAllowance? = nil
     var onContinue: (_ sender: SavedMailingAddress, _ recipient: SavedMailingAddress, _ price: PostcardPriceOption) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -54,10 +57,12 @@ struct PostcardAddressStepView: View {
         return senderOK && recipientOK
     }
 
+    private var allowanceApplies: Bool { (allowance?.remaining ?? 0) > 0 }
+
     private var nextButtonTitle: String {
         guard let price = selectedPriceOption else { return "Next" }
         let sizeLabel = selectedSize == .fourBySix ? "4x6" : "6x9"
-        return "Next: Mail \(sizeLabel) Card - \(price.formattedPrice)"
+        return "Next: Mail \(sizeLabel) Card - \(allowanceApplies ? "Free" : price.formattedPrice)"
     }
 
     var body: some View {
@@ -95,7 +100,7 @@ struct PostcardAddressStepView: View {
                         }
                         .listSectionSpacing(.custom(20))
                     }
-                    Section("Choose Size") {
+                    Section {
                         if let pricingError {
                             Text(pricingError).foregroundColor(.red).font(.subheadline)
                         } else if isPricingLoading && priceOptions.isEmpty {
@@ -107,6 +112,13 @@ struct PostcardAddressStepView: View {
                         } else {
                             ForEach(priceOptions) { option in
                                 sizeRow(option)
+                            }
+                        }
+                    } header: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Choose Size")
+                            if allowanceApplies, let allowance {
+                                Text("\(allowance.remaining) of \(allowance.limit) free postcards left this month")
                             }
                         }
                     }
@@ -189,7 +201,7 @@ struct PostcardAddressStepView: View {
                             .fontWeight(.medium)
                             .foregroundColor(.primary)
                         Spacer()
-                        Text(option.formattedPrice)
+                        Text(allowanceApplies ? "Free" : option.formattedPrice)
                             .foregroundColor(.primary)
                     }
                     if !option.productDescription.isEmpty {

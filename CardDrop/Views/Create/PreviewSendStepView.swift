@@ -67,6 +67,9 @@ struct SendOptionsView: View {
     @State private var showMessageRecipients = false
     @State private var pendingMessageRecipients: [RecipientContact] = []
     @State private var showMailPostcardFlow = false
+    // Free-postcard allowance (friends & family) — display only; refreshed
+    // whenever the mail flow opens/closes or an order is confirmed.
+    @State private var postcardAllowance: PostcardAllowance?
     @State private var showVerifyEmailForMail = false
     // True only when showCreateAccount was opened FROM the "Mail Real
     // Postcard" row (not the free-send-quota prompt) — lets its onSuccess
@@ -360,8 +363,10 @@ struct SendOptionsView: View {
             .environmentObject(draftManager)
             .environmentObject(addressBook)
         }
+        .task(id: showMailPostcardFlow) { postcardAllowance = await PostcardOrderService.fetchAllowance() }
+        .task(id: postcardOrderConfirmed) { postcardAllowance = await PostcardOrderService.fetchAllowance() }
         .sheet(isPresented: $showMailPostcardFlow) {
-            PostcardAddressStepView { sender, recipient, price in
+            PostcardAddressStepView(allowance: postcardAllowance) { sender, recipient, price in
                 pendingMailSender = sender
                 pendingMailRecipient = recipient
                 pendingMailPrice = price
@@ -435,7 +440,9 @@ struct SendOptionsView: View {
                         sendRow(
                             icon: "photo",
                             title: "Mail Real Postcard",
-                            subtitle: "Printed & mailed for you",
+                            subtitle: (postcardAllowance?.remaining ?? 0) > 0
+                                ? "Print & mail – \(postcardAllowance?.remaining ?? 0) free left this month"
+                                : "Printed & mailed for you",
                             color: .brandBlue
                         ) { showMailPostcardFlow = true }
                     }
@@ -924,7 +931,8 @@ struct SendOptionsView: View {
                let backData = draftManager.loadBackData(for: draft.cardID) {
                 let back6x9Data = draftManager.loadBack6x9Data(for: draft.cardID)
                 try await CardUploadService.uploadDigitalCardImages(
-                    cardID: draft.cardID, frontData: frontData, backData: backData, back6x9Data: back6x9Data
+                    cardID: draft.cardID, frontData: frontData, backData: backData, back6x9Data: back6x9Data,
+                    beforeImage: draft.image
                 )
             }
             _ = try await PostcardOrderService.submitToLOB(

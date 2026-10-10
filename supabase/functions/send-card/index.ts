@@ -1,4 +1,5 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { isBanned } from "../_shared/bans.ts";
 
 Deno.serve(async (req) => {
   try {
@@ -25,16 +26,21 @@ Deno.serve(async (req) => {
     if (!cardID)    return json({ error: "cardID required" }, 400);
     if (!deviceUUID) return json({ error: "deviceUUID required" }, 400);
 
-    // ----------------------------------------------------------------
-    // Ban check — device-level, bypasses RLS via service role
-    // ----------------------------------------------------------------
-    const { data: deviceRow } = await supabase
-      .from("user_devices")
-      .select("banned")
-      .eq("device_uuid", deviceUUID)
+    // A deleted card is a tombstone: re-sending it would refill the blanked
+    // row (the upsert below) while deleted_at stays set.
+    const { data: existingCard } = await supabase
+      .from("cards")
+      .select("deleted_at")
+      .eq("id", cardID)
       .maybeSingle();
+    if (existingCard?.deleted_at) return json({ error: "card_deleted" }, 410);
 
-    if (deviceRow?.banned) {
+    // ----------------------------------------------------------------
+    // Ban check — account, verified email, or device (see _shared/bans.ts).
+    // Bypasses RLS via service role.
+    // ----------------------------------------------------------------
+    const isVerified = isVerifiedUser(user);
+    if (await isBanned(supabase, user, isVerified, deviceUUID)) {
       return json({ error: "suspended" }, 403);
     }
 
@@ -56,7 +62,6 @@ Deno.serve(async (req) => {
     // Priority: unlimited (paid) > verified (OTP done) > unverified > anonymous
     // ----------------------------------------------------------------
     const isAnonymous = user.is_anonymous ?? false;
-    const isVerified  = isVerifiedUser(user);
 
     let tier: string;
     if (dbTier === "unlimited")  tier = "unlimited";
@@ -91,6 +96,27 @@ Deno.serve(async (req) => {
     }
     if (lifetimeLimit !== -1 && sendsLifetime >= lifetimeLimit) {
       return json({ error: "lifetime_limit_reached", tier }, 429);
+    }
+
+    // Device-level cap for anonymous/unverified: a new anonymous ID or account
+    // on the same device doesn't reset the count. month_key lets the monthly
+    // count reset itself.
+    const monthKey = new Date().toISOString().slice(0, 7);
+    const { data: deviceCounts } = await supabase
+      .from("user_devices")
+      .select("sends_this_month, sends_lifetime, month_key")
+      .eq("device_uuid", deviceUUID)
+      .maybeSingle();
+    const deviceMonth    = deviceCounts?.month_key === monthKey ? (deviceCounts?.sends_this_month ?? 0) : 0;
+    const deviceLifetime = deviceCounts?.sends_lifetime ?? 0;
+    const deviceCapped   = tier === "anonymous" || tier === "unverified";
+    if (deviceCapped) {
+      if (monthlyLimit !== -1 && deviceMonth >= monthlyLimit) {
+        return json({ error: "monthly_limit_reached", tier }, 429);
+      }
+      if (lifetimeLimit !== -1 && deviceLifetime >= lifetimeLimit) {
+        return json({ error: "lifetime_limit_reached", tier }, 429);
+      }
     }
 
     // ----------------------------------------------------------------
@@ -129,6 +155,7 @@ Deno.serve(async (req) => {
         message_preview:    messagePreview   ?? null,
         teaser_image_url:   teaserImageUrl,
         thumbnail_url:      thumbnailUrl,
+        device_uuid:        deviceUUID,
         is_portrait:        isPortrait       ?? true,
         front_ink_message:  frontInkMessage  ?? null,
         back_ink_message:   backInkMessage   ?? null,
@@ -170,11 +197,26 @@ Deno.serve(async (req) => {
       })
       .eq("id", user.id);
 
+    // Per-device counters (links the device to this account as a side effect).
+    await supabase.from("user_devices").upsert(
+      {
+        device_uuid:      deviceUUID,
+        user_id:          user.id,
+        sends_this_month: deviceMonth + 1,
+        sends_lifetime:   deviceLifetime + 1,
+        month_key:        monthKey,
+      },
+      { onConflict: "device_uuid" },
+    );
+
     // ----------------------------------------------------------------
-    // Return result with remaining counts (-1 = unlimited)
+    // Return result with remaining counts (-1 = unlimited). For capped tiers
+    // the stricter of the account and device counts applies.
     // ----------------------------------------------------------------
-    const remainingMonthly  = monthlyLimit  === -1 ? -1 : monthlyLimit  - sendsMonth  - 1;
-    const remainingLifetime = lifetimeLimit === -1 ? -1 : lifetimeLimit - sendsLifetime - 1;
+    const usedMonth    = deviceCapped ? Math.max(sendsMonth, deviceMonth) : sendsMonth;
+    const usedLifetime = deviceCapped ? Math.max(sendsLifetime, deviceLifetime) : sendsLifetime;
+    const remainingMonthly  = monthlyLimit  === -1 ? -1 : monthlyLimit  - usedMonth    - 1;
+    const remainingLifetime = lifetimeLimit === -1 ? -1 : lifetimeLimit - usedLifetime - 1;
 
     return json({
       cardURL:                cardWebUrl,
