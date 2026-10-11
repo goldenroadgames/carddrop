@@ -244,10 +244,14 @@ function json(body: unknown, status = 200): Response {
 // (app_metadata is writable only with the service role) or they signed in
 // with Apple (Supabase adds an apple identity only after validating Apple's
 // token). user_metadata.send_unlocked is NOT trusted: users can write it.
+// The flag also needs Supabase's own email_confirmed_at (set only by the auth
+// server when a code is really verified), so a flag set by mistake or by a bad
+// manual edit does not grant verified privileges.
 function isVerifiedUser(user: {
   app_metadata?: Record<string, unknown> | null;
   identities?: { provider: string }[] | null;
+  email_confirmed_at?: string | null;
 }): boolean {
-  return user.app_metadata?.send_unlocked === true ||
+  return (user.app_metadata?.send_unlocked === true && !!user.email_confirmed_at) ||
     (user.identities ?? []).some((i) => i.provider === "apple");
 }

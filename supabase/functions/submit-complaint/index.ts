@@ -149,6 +149,22 @@ Deno.serve(async (req) => {
         "Repeated reports can lead to your account being suspended.");
     }
 
+    // Heads-up to the owner for every NEW reported card (repeat reports on the
+    // same card returned earlier). Goes to ADMIN_ALERT_EMAIL, else support.
+    await sendEmail(
+      Deno.env.get("ADMIN_ALERT_EMAIL") ?? "support@carddropapp.com",
+      strikes >= threshold ? "CardDrop: card reported, account suspended" : "CardDrop: card reported",
+      [
+        `A card was reported (${mailed ? "mailed" : "digital"}).`,
+        `Strikes on this sender: ${strikes} of ${threshold}${strikes >= threshold ? " (account auto-suspended)" : ""}.`,
+        senderEmail ? `Sender: ${senderEmail}` : "Sender: no email (anonymous account)",
+        ...(blockAll ? ["The reporter asked to block all senders from their address."] : []),
+        text ? `Reporter wrote: ${text.slice(0, 500)}` : "No complaint text.",
+        "",
+        "Review it: https://carddropapp.com/grg_admin/reported-cards",
+      ].join("\n"),
+    );
+
     return json({ status: "ok" });
   } catch (err) {
     console.error("submit-complaint error:", err);

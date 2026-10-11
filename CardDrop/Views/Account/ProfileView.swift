@@ -12,6 +12,8 @@ struct ProfileView: View {
     @State private var showStorageUpgrade = false
     @State private var showOTPVerification = false
     @State private var showSignInGate = false
+    @State private var showRepliesOffChoice = false
+    @State private var repliesErrorShown = false
 
     @State private var senderNickname = ""
     @State private var nicknameSyncTask: Task<Void, Never>?
@@ -24,6 +26,14 @@ struct ProfileView: View {
     @State private var stateField = ""
     @State private var zip = ""
     @State private var country = ""
+
+    private func turnRepliesOff(deleteExisting: Bool) {
+        Task {
+            if !(await authManager.setRepliesEnabled(false, deleteExisting: deleteExisting)) {
+                repliesErrorShown = true
+            }
+        }
+    }
 
     private var profileIsDirty: Bool {
         firstName    != authManager.firstName    ||
@@ -64,6 +74,29 @@ struct ProfileView: View {
                     } label: {
                         Text("Privacy Policy")
                     }
+                    Button {
+                        if authManager.repliesEnabled {
+                            showRepliesOffChoice = true
+                        } else {
+                            Task {
+                                if !(await authManager.setRepliesEnabled(true)) { repliesErrorShown = true }
+                            }
+                        }
+                    } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: authManager.repliesEnabled ? "checkmark.square" : "square")
+                                .font(.system(size: 22))
+                                .foregroundStyle(.primary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Allow replies")
+                                    .foregroundStyle(.primary)
+                                Text("Let people react to your cards with messages, photos and emojis")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                     if !authManager.isAnonymous {
                         Button {
                             authManager.setAllowMarketingUse(!authManager.allowMarketingUse)
@@ -152,6 +185,18 @@ struct ProfileView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("You'll be signed out. Your drafts and addresses will be here when you sign back in.")
+            }
+            .confirmationDialog("Turn off replies?", isPresented: $showRepliesOffChoice, titleVisibility: .visible) {
+                Button("Hide existing replies") { turnRepliesOff(deleteExisting: false) }
+                Button("Delete existing replies", role: .destructive) { turnRepliesOff(deleteExisting: true) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Replies and reactions stop on all your cards. Hidden ones come back if you turn replies on again; deleted ones are gone for good.")
+            }
+            .alert("Couldn't update replies", isPresented: $repliesErrorShown) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Check your connection and try again.")
             }
             .sheet(isPresented: $showOTPVerification) {
                 OTPVerificationView()

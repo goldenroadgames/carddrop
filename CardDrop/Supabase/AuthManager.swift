@@ -30,6 +30,11 @@ class AuthManager: NSObject, ObservableObject {
     // match the DB column default; only meaningful for non-anonymous users.
     @Published var allowMarketingUse: Bool = true
 
+    // "Allow replies" (users.replies_enabled): off = no replies or emoji
+    // reactions on any card. Written by the set-replies-enabled function, not
+    // directly. Mirrored into CardReplyService so reply lists follow it.
+    @Published private(set) var repliesEnabled: Bool = true
+
     // Subscription tier
     @Published private(set) var hasPermanentStorage: Bool = false
 
@@ -97,11 +102,12 @@ class AuthManager: NSObject, ObservableObject {
             let tier: String?
             let sends_this_month: Int?
             let allow_marketing_use: Bool?
+            let replies_enabled: Bool?
         }
         struct ConfigRow: Decodable { let value: String }
         guard let row = try? await supabase
             .from("users")
-            .select("first_name, last_name, phone, street, city, state, zip, country, tier, sends_this_month, allow_marketing_use")
+            .select("first_name, last_name, phone, street, city, state, zip, country, tier, sends_this_month, allow_marketing_use, replies_enabled")
             .eq("id", value: id.uuidString)
             .single()
             .execute()
@@ -138,7 +144,23 @@ class AuthManager: NSObject, ObservableObject {
             hasPermanentStorage  = row.tier == "unlimited"
             nearMonthlyLimit     = nearLimit
             allowMarketingUse    = row.allow_marketing_use ?? true
+            repliesEnabled       = row.replies_enabled ?? true
+            CardReplyService.profileRepliesEnabled = repliesEnabled
         }
+    }
+
+    /// Profile "Allow replies" switch for ALL cards. When turning off,
+    /// deleteExisting permanently removes replies, photos and reactions
+    /// already received; otherwise they are just hidden and come back if
+    /// replies are turned on again. Returns false if the server call failed
+    /// (nothing changes).
+    @MainActor
+    func setRepliesEnabled(_ enabled: Bool, deleteExisting: Bool = false) async -> Bool {
+        let ok = await CardReplyService.setRepliesEnabled(enabled, cardID: nil, deleteExisting: deleteExisting)
+        guard ok else { return false }
+        repliesEnabled = enabled
+        CardReplyService.profileRepliesEnabled = enabled
+        return true
     }
 
     /// Persists the marketing-use opt-out (Privacy Policy Section 5). Only
@@ -251,6 +273,8 @@ class AuthManager: NSObject, ObservableObject {
         hasPermanentStorage = false
         nearMonthlyLimit = false
         allowMarketingUse = true
+        repliesEnabled = true
+        CardReplyService.profileRepliesEnabled = true
     }
 
     // MARK: - Email
