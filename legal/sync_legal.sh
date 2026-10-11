@@ -14,6 +14,7 @@ cd "$REPO_ROOT"
 FILES=(
   "legal/TERMS_OF_SERVICE.md:terms-of-service.md"
   "legal/PRIVACY_POLICY.md:privacy-policy.md"
+  "legal/HELP.md:help.md"
 )
 
 for entry in "${FILES[@]}"; do

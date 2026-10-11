@@ -4,6 +4,7 @@ enum LegalDocumentService {
     enum Document: String, Identifiable {
         case termsOfService = "terms-of-service.md"
         case privacyPolicy = "privacy-policy.md"
+        case help = "help.md"
 
         var id: String { rawValue }
     }

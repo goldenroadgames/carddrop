@@ -70,6 +70,11 @@ struct ProfileView: View {
                         .buttonStyle(.plain)
                     }
                     NavigationLink {
+                        LegalDocumentView(title: "Help", document: .help)
+                    } label: {
+                        Text("Help")
+                    }
+                    NavigationLink {
                         LegalDocumentView(title: "Terms of Service", document: .termsOfService)
                     } label: {
                         Text("Terms of Service")

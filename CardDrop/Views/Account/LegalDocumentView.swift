@@ -19,7 +19,7 @@ struct LegalDocumentView: View {
             Group {
                 if let blocks {
                     VStack(alignment: .leading, spacing: 14) {
-                        if let lastModified {
+                        if let lastModified, document != .help {
                             Text("Last updated: \(Self.displayDateFormatter.string(from: lastModified))")
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
@@ -52,9 +52,18 @@ struct LegalDocumentView: View {
     private func blockView(_ block: MarkdownBlock) -> some View {
         switch block {
         case .heading(let level, let text):
-            Text(inline(text))
-                .font(level <= 1 ? .title2.bold() : .title3.bold())
-                .padding(.top, level <= 1 ? 4 : 8)
+            if document == .help && level == 2 {
+                // Help's group labels: small blue all-caps, like the website.
+                Text(inline(text))
+                    .font(.footnote.weight(.semibold))
+                    .textCase(.uppercase)
+                    .foregroundColor(.accentColor)
+                    .padding(.top, 14)
+            } else {
+                Text(inline(text))
+                    .font(level <= 1 ? .title2.bold() : .title3.bold())
+                    .padding(.top, level <= 1 ? 4 : 8)
+            }
         case .bullet(let text):
             HStack(alignment: .top, spacing: 8) {
                 Text("•")
