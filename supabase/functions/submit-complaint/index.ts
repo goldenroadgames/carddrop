@@ -70,9 +70,18 @@ Deno.serve(async (req) => {
       return json({ status: "ok" });
     }
 
+    // The sender's email, kept with the complaint for 12 months even if the
+    // account is later deleted (null for anonymous senders).
+    let senderEmail: string | null = null;
+    if (card.sender_id) {
+      const { data: senderUser } = await supabase.auth.admin.getUserById(card.sender_id);
+      senderEmail = senderUser?.user?.email?.toLowerCase() ?? null;
+    }
+
     const { error: insertError } = await supabase.from("card_complaints").insert({
       card_id:        card.id,
       sender_id:      card.sender_id,
+      sender_email:   senderEmail,
       device_uuid:    card.device_uuid,
       complaint_text: text || null,
       block_all:      blockAll && mailed,

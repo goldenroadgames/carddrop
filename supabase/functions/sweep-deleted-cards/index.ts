@@ -49,7 +49,8 @@ Deno.serve(async (req) => {
     const retention: Record<string, string | null> = {};
     const steps: [string, PromiseLike<{ error: { message: string } | null }>][] = [
       ["complaint_text", supabase.from("card_complaints")
-        .update({ complaint_text: null }).lt("created_at", cutoff).not("complaint_text", "is", null)],
+        .update({ complaint_text: null, sender_email: null }).lt("created_at", cutoff)
+        .or("complaint_text.not.is.null,sender_email.not.is.null")],
       ["order_snapshots", supabase.from("physical_orders").update({
         recipient_first_name: null, recipient_last_name: null, recipient_street: null,
         recipient_city: null, recipient_state: null, recipient_zip: null, recipient_country: null,

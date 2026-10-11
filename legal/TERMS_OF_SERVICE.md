@@ -47,7 +47,7 @@ You agree not to use the Service to:
 
 We reserve the right to review, remove, or refuse to process any content submitted for printing, and to suspend or terminate accounts that violate this section, at our discretion.
 
-**Reports from recipients.** Anyone who receives a card can report it. If a recipient reports a card you sent, you will be warned and you will no longer be able to mail to that recipient's address; if you are reported repeatedly, we will suspend your account and the devices you use, without further notice. Digital cards are sent from your own device through your own messaging and email apps, not by us, and you are solely responsible for the cards you send and the recipients you choose. A card that is reported is hidden and locked: you will not be able to view it in the app, delete, resend or copy it, and we keep it for 12 months before deleting it. Deleting your account removes it sooner.
+**Reports from recipients.** Anyone who receives a card can report it. If a recipient reports a card you sent, you will be warned and you will no longer be able to mail to that recipient's address; if you are reported repeatedly, we will suspend your account and the devices you use, without further notice. Digital cards are sent from your own device through your own messaging and email apps, not by us, and you are solely responsible for the cards you send and the recipients you choose. A card that is reported is hidden and locked: you will not be able to view it in the app, delete, resend or copy it, and we keep it for 12 months before deleting it, even if you delete your account.
 
 ## 7. Physical Fulfillment and Delivery
 
