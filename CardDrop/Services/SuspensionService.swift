@@ -5,7 +5,7 @@ import Supabase
 /// account, its verified email, this device, or a device linked to it).
 enum SuspensionService {
 
-    private struct Params: Encodable {
+    private nonisolated struct Params: Encodable {
         let p_device: String
     }
 
