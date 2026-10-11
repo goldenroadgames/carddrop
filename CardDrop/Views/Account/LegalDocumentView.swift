@@ -41,6 +41,9 @@ struct LegalDocumentView: View {
                 }
             }
             .padding()
+            // Clear the bottom Postcards/Profile control so the last lines
+            // (the Privacy / Terms links) aren't hidden behind it.
+            .padding(.bottom, 96)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(title)

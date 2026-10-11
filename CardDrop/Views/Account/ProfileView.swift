@@ -49,26 +49,6 @@ struct ProfileView: View {
                 }
 
                 Section {
-                    Text("Notifications")
-                    if !authManager.isAnonymous {
-                        Button {
-                            authManager.setAllowMarketingUse(!authManager.allowMarketingUse)
-                        } label: {
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: authManager.allowMarketingUse ? "checkmark.square" : "square")
-                                    .font(.system(size: 22))
-                                    .foregroundStyle(.primary)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Allow limited marketing use of my cards")
-                                        .foregroundStyle(.primary)
-                                    Text("See the Terms of Service and Privacy Policy below.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
                     NavigationLink {
                         LegalDocumentView(title: "Help", document: .help)
                     } label: {
@@ -83,6 +63,25 @@ struct ProfileView: View {
                         LegalDocumentView(title: "Privacy Policy", document: .privacyPolicy)
                     } label: {
                         Text("Privacy Policy")
+                    }
+                    if !authManager.isAnonymous {
+                        Button {
+                            authManager.setAllowMarketingUse(!authManager.allowMarketingUse)
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: authManager.allowMarketingUse ? "checkmark.square" : "square")
+                                    .font(.system(size: 22))
+                                    .foregroundStyle(.primary)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Allow limited marketing use of my cards")
+                                        .foregroundStyle(.primary)
+                                    Text("See the Terms of Service and Privacy Policy above.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
                 } header: {
                     HStack {
@@ -107,6 +106,16 @@ struct ProfileView: View {
 
                 Section {
                     DeleteAccountButton()
+                }
+
+                // Clears the bottom Postcards/Profile bar (an inset on an
+                // ancestor, invisible to this List) so Delete Account can
+                // scroll fully into view.
+                Section {
+                    Color.clear
+                        .frame(height: 96)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {

@@ -6,7 +6,7 @@ CardDrop lets people make a postcard from their own photos, send it free as a di
 
 ### Someone sent me a CardDrop link. What is it?
 
-It's a digital postcard. Open the link and the card opens for you to flip, read and reply to. You don't need an account or the app to view it. A card sent on the free plan stays available for 30 days.
+It's a digital postcard. Open the link and the card opens for you to flip, read and reply to. You don't need an account or the app to view it. A card sent on the free plan stays available for at least 30 days.
 
 ### Can I reply or react?
 
