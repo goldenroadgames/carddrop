@@ -219,7 +219,12 @@ struct PostcardsView: View {
         } message: {
             Text(noticeMessage)
         }
-        .task { await showPendingNotice() }
+        .task {
+            if let id = authManager.currentUserID {
+                await CardRestoreService.refreshReported(userID: id, draftManager: draftManager)
+            }
+            await showPendingNotice()
+        }
     }
 
     // MARK: - Notices
@@ -268,7 +273,7 @@ struct PostcardsView: View {
         draftManager.drafts.filter { $0.status == .unsent }.sorted { $0.lastModified > $1.lastModified }
     }
     private var sentCards: [PostcardDraftSnapshot] {
-        draftManager.drafts.filter { $0.status == .sent }.sorted { $0.lastModified > $1.lastModified }
+        draftManager.drafts.filter { $0.status == .sent && !draftManager.isHidden($0) }.sorted { $0.lastModified > $1.lastModified }
     }
 
     private var ringsContent: some View {

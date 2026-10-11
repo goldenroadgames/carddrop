@@ -47,7 +47,7 @@ You agree not to use the Service to:
 
 We reserve the right to review, remove, or refuse to process any content submitted for printing, and to suspend or terminate accounts that violate this section, at our discretion.
 
-**Reports from recipients.** Anyone who receives a card can report it. If a recipient reports a card you sent, you will be warned and you will no longer be able to mail to that recipient's address; if you are reported repeatedly, we will suspend your account and the devices you use, without further notice. Digital cards are sent from your own device through your own messaging and email apps, not by us, and you are solely responsible for the cards you send and the recipients you choose.
+**Reports from recipients.** Anyone who receives a card can report it. If a recipient reports a card you sent, you will be warned and you will no longer be able to mail to that recipient's address; if you are reported repeatedly, we will suspend your account and the devices you use, without further notice. Digital cards are sent from your own device through your own messaging and email apps, not by us, and you are solely responsible for the cards you send and the recipients you choose. A card that is reported is hidden and locked: you will not be able to view it in the app, delete, resend or copy it, and we keep it for 12 months before deleting it. Deleting your account removes it sooner.
 
 ## 7. Physical Fulfillment and Delivery
 
@@ -63,7 +63,7 @@ The Service itself, including its software, design, branding, and content we cre
 
 ## 10. Termination
 
-You may stop using the Service or delete your account at any time. We may suspend or terminate your access to the Service if you violate these Terms or are reported repeatedly by recipients, at our discretion, with or without notice. We may, but are not required to, review a suspension or restore an account; you can contact support at the address below. We may keep a record of a suspension, including a verified email address, so that a suspended person cannot create a new account. Sections of these Terms that by their nature should survive termination (including Sections 5, 9, 11, and 12) will survive.
+You may stop using the Service or delete your account at any time. We may suspend or terminate your access to the Service if you violate these Terms or are reported repeatedly by recipients, at our discretion, with or without notice. While an account is suspended, the links to all of its cards stop working. We may, but are not required to, review a suspension or restore an account; you can contact support at the address below. We may keep a record of a suspension, including a verified email address, so that a suspended person cannot create a new account. Sections of these Terms that by their nature should survive termination (including Sections 5, 9, 11, and 12) will survive.
 
 ## 11. Disclaimers and Limitation of Liability
 

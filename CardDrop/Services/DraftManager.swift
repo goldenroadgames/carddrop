@@ -4,6 +4,15 @@ import UIKit
 class DraftManager: ObservableObject {
     @Published private(set) var drafts: [PostcardDraftSnapshot] = []
 
+    /// Server-side ids of this user's cards that received a complaint. Those
+    /// cards are hidden from every list (the sender isn't told which one).
+    @Published var reportedCardIDs: Set<UUID> = []
+
+    func isHidden(_ snapshot: PostcardDraftSnapshot) -> Bool {
+        guard let cardID = snapshot.cardID else { return false }
+        return reportedCardIDs.contains(cardID)
+    }
+
     // Set once at app launch and updated on account switch via CardDropApp.
     // Stored as a var so nonisolated functions can derive paths from it.
     private var directory: URL = DraftManager.draftsDirectory(for: "_pending")
@@ -17,6 +26,7 @@ class DraftManager: ObservableObject {
     func setUser(_ userID: String) {
         directory = DraftManager.draftsDirectory(for: userID)
         drafts = []
+        reportedCardIDs = []
         createDirectoryIfNeeded()
         loadIndex()
     }
@@ -24,6 +34,7 @@ class DraftManager: ObservableObject {
     /// Clear in-memory data without touching disk (used on sign-out of named accounts).
     func clearUser() {
         drafts = []
+        reportedCardIDs = []
     }
 
     // MARK: - Public API

@@ -1,5 +1,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { purgeCard } from "../_shared/purgeCard.ts";
+import { deleteCard } from "../_shared/deleteCard.ts";
 
 // Scheduled job: finishes deletes that failed partway (deleted_at set,
 // purged_at null) and runs the 12-month retention scrubs. Called by Supabase
@@ -64,7 +65,23 @@ Deno.serve(async (req) => {
       if (opError) console.error("sweep retention error:", name, opError.message);
     }
 
-    return json({ purged, failed, retention });
+    // Reported cards are kept as evidence for 12 months, then deleted like
+    // any other card (blanked tombstone + files purged).
+    const { data: expiredReports } = await supabase
+      .from("cards")
+      .select("id, sender_id, deleted_at")
+      .not("reported_at", "is", null)
+      .lt("reported_at", cutoff)
+      .is("deleted_at", null)
+      .limit(50);
+    let reportedDeleted = 0;
+    for (const card of expiredReports ?? []) {
+      const err = await deleteCard(supabase, card);
+      if (err) console.error("sweep reported-card error:", card.id, err);
+      else reportedDeleted++;
+    }
+
+    return json({ purged, failed, reportedDeleted, retention });
   } catch (err) {
     console.error("sweep-deleted-cards error:", err);
     return json({ error: "Internal server error" }, 500);

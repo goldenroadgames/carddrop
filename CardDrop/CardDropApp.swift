@@ -71,6 +71,7 @@ struct CardDropApp: App {
                     draftManager.setUser(idString)
                     addressBook.setUser(idString)
                     if !authManager.isAnonymous {
+                        await CardRestoreService.refreshReported(userID: idString, draftManager: draftManager)
                         await CardRestoreService.syncIfNeeded(userID: idString, draftManager: draftManager)
                     }
                     let sessionValid = await UserService.upsertUser(id: id)

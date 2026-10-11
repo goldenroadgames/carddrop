@@ -76,6 +76,14 @@ Deno.serve(async (req) => {
       return json({ status: "ok" });
     }
 
+    // Hide the card everywhere (web page, sender's app) and lock it from
+    // delete / resend. Idempotent: only the first report stamps it.
+    await supabase
+      .from("cards")
+      .update({ reported_at: new Date().toISOString() })
+      .eq("id", card.id)
+      .is("reported_at", null);
+
     if (mailed) {
       await writeBlocks(supabase, orders ?? [], card.sender_id);
       if (blockAll) await writeBlocks(supabase, orders ?? [], null);

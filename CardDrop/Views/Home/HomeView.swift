@@ -10,7 +10,7 @@ struct HomeView: View {
 
     private var recentCards: [PostcardDraftSnapshot] {
         let drafts = draftManager.drafts.filter { $0.status == .unsent }.sorted { $0.lastModified > $1.lastModified }
-        let sent   = draftManager.drafts.filter { $0.status == .sent   }.sorted { $0.lastModified > $1.lastModified }
+        let sent   = draftManager.drafts.filter { $0.status == .sent && !draftManager.isHidden($0) }.sorted { $0.lastModified > $1.lastModified }
         if drafts.isEmpty { return Array(sent.prefix(3)) }
         var result = Array(drafts.prefix(1)) + Array(sent.prefix(2))
         if result.count < 3 {

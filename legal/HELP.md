@@ -2,24 +2,6 @@
 
 CardDrop lets people make a postcard from their own photos, send it free as a digital card, and, if they want, have a real printed copy mailed.
 
-## If you received a card
-
-### Someone sent me a CardDrop link. What is it?
-
-It's a digital postcard. Open the link and the card opens for you to flip, read and reply to. You don't need an account or the app to view it. A card sent on the free plan stays available for at least 30 days.
-
-### Can I reply or react?
-
-Yes. Use the reply and reaction buttons under the card. Your reply goes back to the person who sent it.
-
-### I got a physical postcard. How do I stop getting them?
-
-Scan the QR code on the card, or open its link, and choose **Report abuse**. Tick *stop all senders mailing this address* to block every CardDrop sender from mailing your address. The report also stops that sender from mailing anyone at that address again. We don't ask for your name, email or phone number.
-
-### I got a card I didn't want.
-
-Use **Report abuse** under the card. We record the report against the sender. Reports on multiple cards can lead to the sender's account being suspended. CardDrop digital cards are sent from the sender's own phone (Messages, Mail), so we can't see or block who they send to. You can also block the sender's number or email on your phone.
-
 ## If you use the app
 
 ### How do I make and send a card?
@@ -45,6 +27,24 @@ In the app, open your profile and choose **Delete Account**. This removes your c
 ### My account was suspended.
 
 Accounts are suspended after repeated reports from recipients. If you think it was a mistake, email us.
+
+## If you received a card
+
+### Someone sent me a CardDrop link. What is it?
+
+It's a digital postcard. Open the link and the card opens for you to flip, read and reply to. You don't need an account or the app to view it. A card sent on the free plan stays available for at least 30 days.
+
+### Can I reply or react?
+
+Yes. Use the reply and reaction buttons under the card. Your reply goes back to the person who sent it.
+
+### I got a physical postcard. How do I stop getting them?
+
+Scan the QR code on the card, or open its link, and choose **Report abuse**. Tick *stop all senders mailing this address* to block every CardDrop sender from mailing your address. The report also stops that sender from mailing anyone at that address again. We don't ask for your name, email or phone number.
+
+### I got a card I didn't want.
+
+Use **Report abuse** under the card. We record the report against the sender. Reports on multiple cards can lead to the sender's account being suspended. CardDrop digital cards are sent from the sender's own phone (Messages, Mail), so we can't see or block who they send to. You can also block the sender's number or email on your phone.
 
 ## Contact
 

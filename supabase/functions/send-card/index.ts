@@ -30,10 +30,12 @@ Deno.serve(async (req) => {
     // row (the upsert below) while deleted_at stays set.
     const { data: existingCard } = await supabase
       .from("cards")
-      .select("deleted_at")
+      .select("deleted_at, reported_at")
       .eq("id", cardID)
       .maybeSingle();
     if (existingCard?.deleted_at) return json({ error: "card_deleted" }, 410);
+    // A reported card is locked: no resending it.
+    if (existingCard?.reported_at) return json({ error: "card_unavailable" }, 403);
 
     // ----------------------------------------------------------------
     // Ban check — account, verified email, or device (see _shared/bans.ts).
