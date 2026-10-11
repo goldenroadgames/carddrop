@@ -259,6 +259,7 @@ struct SendOptionsView: View {
             }
             #endif
         .onAppear {
+            SuspensionMonitor.trigger()
             mailAvailable = MFMailComposeViewController.canSendMail()
             teaserImage       = freshFrontImage  ?? draftManager.loadFront(for: draft.cardID)
             backRenderImage   = freshBackImage   ?? draftManager.loadBack(for: draft.cardID)

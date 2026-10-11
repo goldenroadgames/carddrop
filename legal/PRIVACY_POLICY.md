@@ -69,7 +69,7 @@ Some records are kept for a set period, even if you delete a card or your accoun
 
 ## 7. Your Choices and Rights
 
-Depending on your location, you may have the right to access, correct, delete, or export your personal information. You can manage most of this directly in the app (editing or deleting saved addresses, drafts, your account, or your marketing-use preference described in Section 5). You can delete your account at any time in the app (Profile, then Delete Account). This deletes your account, your cards and their shared links, your saved addresses, and your files, except for the records described in Section 6 and any copies already featured in our marketing (Section 5). To request access to your data or any other change, contact us at support@goldenroadgames.com.
+Depending on your location, you may have the right to access, correct, delete, or export your personal information. You can manage most of this directly in the app (editing or deleting saved addresses, drafts, your account, or your marketing-use preference described in Section 5). You can delete your account at any time in the app (Profile, then Delete Account). This deletes your account, your cards and their shared links, your saved addresses, and your files, except for the records described in Section 6 and any copies already featured in our marketing (Section 5). To request access to your data or any other change, contact us at support@carddropapp.com.
 
 ## 8. Children's Privacy
 
@@ -89,4 +89,4 @@ We may update this Privacy Policy from time to time. If we make material changes
 
 ## 12. Contact
 
-Questions about this Privacy Policy or your data can be sent to support@goldenroadgames.com.
+Questions about this Privacy Policy or your data can be sent to support@carddropapp.com.

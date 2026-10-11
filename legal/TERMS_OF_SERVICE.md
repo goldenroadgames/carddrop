@@ -83,4 +83,4 @@ We may update these Terms from time to time. If we make material changes, we wil
 
 ## 15. Contact
 
-Questions about these Terms can be sent to support@goldenroadgames.com.
+Questions about these Terms can be sent to support@carddropapp.com.

@@ -10,7 +10,7 @@ struct CardDropApp: App {
     @StateObject private var draftManager = DraftManager()
     @StateObject private var appSettings = AppSettings()
     @State private var didSkipAuth = false
-    @State private var isSuspended = false
+    @ObservedObject private var suspension = SuspensionMonitor.shared
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -30,7 +30,7 @@ struct CardDropApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if isSuspended {
+                if suspension.isSuspended {
                     SuspendedView()
                         .environmentObject(authManager)
                         .environmentObject(draftManager)
@@ -56,11 +56,7 @@ struct CardDropApp: App {
             // so recheck whenever it comes back to the foreground.
             .onChange(of: scenePhase) {
                 guard scenePhase == .active else { return }
-                Task {
-                    if let suspended = await SuspensionService.isSuspended() {
-                        isSuspended = suspended
-                    }
-                }
+                Task { await suspension.recheck(force: true) }
                 // Cards reported while the app was in the background.
                 if let idString = authManager.currentUserID {
                     Task { await CardRestoreService.refreshReported(userID: idString, draftManager: draftManager) }
@@ -87,9 +83,7 @@ struct CardDropApp: App {
                     if !authManager.isAnonymous && !authManager.isEmailVerified {
                         await authManager.refreshSessionAsync()
                     }
-                    if let suspended = await SuspensionService.isSuspended() {
-                        isSuspended = suspended
-                    }
+                    await suspension.recheck(force: true)
                 } else {
                     draftManager.clearUser()
                     addressBook.clearUser()

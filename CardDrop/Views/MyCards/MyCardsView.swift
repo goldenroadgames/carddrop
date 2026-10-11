@@ -34,7 +34,10 @@ struct PostcardsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Button(action: { showCreateFlow = true }) {
+                Button(action: {
+                    SuspensionMonitor.trigger()
+                    showCreateFlow = true
+                }) {
                     HStack {
                         Image("SendIcon")
                             .resizable()

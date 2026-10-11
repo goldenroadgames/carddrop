@@ -18,11 +18,11 @@ struct SuspendedView: View {
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
-            Text("If you have questions, contact support@goldenroadgames.com.")
+            Text("If you have questions, contact support@carddropapp.com.")
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
-            if let url = URL(string: "mailto:support@goldenroadgames.com") {
+            if let url = URL(string: "mailto:support@carddropapp.com") {
                 Link("Email Support", destination: url)
                     .font(.body.weight(.semibold))
             }

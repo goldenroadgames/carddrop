@@ -131,7 +131,7 @@ Deno.serve(async (req) => {
       }
       await notifySender(supabase, card.sender_id, "ban",
         "Your CardDrop account has been suspended after repeated reports from recipients. " +
-        "If you have questions, contact support@goldenroadgames.com.");
+        "If you have questions, contact support@carddropapp.com.");
     } else {
       const when = card.sent_at ? new Date(card.sent_at).toLocaleDateString("en-US") : "recently";
       await notifySender(supabase, card.sender_id, "warning",

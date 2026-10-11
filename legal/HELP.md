@@ -48,6 +48,6 @@ Use **Report abuse** under the card. We record the report against the sender. Re
 
 ## Contact
 
-Questions, problems or requests: [support@goldenroadgames.com](mailto:support@goldenroadgames.com)
+Questions, problems or requests: [support@carddropapp.com](mailto:support@carddropapp.com)
 
 [Privacy](https://carddropapp.com/privacy) · [Terms](https://carddropapp.com/terms)
