@@ -7,7 +7,7 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 //   - the device (user_devices.banned) or any device already linked to the
 //     account
 // A banned device also flags the account it is signing in as, so the ban
-// follows them if they switch devices.
+// follows them if they switch devices. A ban is active while reinstated_at is null.
 export async function isBanned(
   supabase: SupabaseClient,
   user: { id: string; email?: string | null },
@@ -18,6 +18,7 @@ export async function isBanned(
     .from("account_bans")
     .select("id")
     .eq("user_id", user.id)
+    .is("reinstated_at", null)
     .maybeSingle();
   if (accountBan) return true;
 
@@ -26,6 +27,7 @@ export async function isBanned(
       .from("account_bans")
       .select("id")
       .eq("email", user.email.toLowerCase())
+      .is("reinstated_at", null)
       .limit(1)
       .maybeSingle();
     if (emailBan) return true;
@@ -52,15 +54,8 @@ export async function isBanned(
   }
 
   if (deviceBanned) {
-    // Flag the account too (ignore a duplicate).
-    await supabase.from("account_bans").upsert(
-      {
-        user_id: user.id,
-        email: isVerified && user.email ? user.email.toLowerCase() : null,
-        reason: "device banned",
-      },
-      { onConflict: "user_id", ignoreDuplicates: true },
-    );
+    // Flag the account too (ban_account ignores a duplicate active ban).
+    await supabase.rpc("ban_account", { p_user_id: user.id, p_reason: "device banned" });
     return true;
   }
   return false;

@@ -56,6 +56,13 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (existing) {
+      // Make sure the card is hidden even if this complaint predates the
+      // reported_at column (idempotent: only stamps when still null).
+      await supabase
+        .from("cards")
+        .update({ reported_at: new Date().toISOString() })
+        .eq("id", card.id)
+        .is("reported_at", null);
       if (blockAll && !existing.block_all && mailed) {
         await supabase.from("card_complaints").update({ block_all: true }).eq("id", existing.id);
         await writeBlocks(supabase, orders ?? [], null);

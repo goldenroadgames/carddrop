@@ -2,6 +2,7 @@ import SwiftUI
 
 struct PostcardsView: View {
     @EnvironmentObject private var authManager: AuthManager
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var draftManager: DraftManager
     @EnvironmentObject private var addressBook: AddressBookManager
 
@@ -219,11 +220,12 @@ struct PostcardsView: View {
         } message: {
             Text(noticeMessage)
         }
-        .task {
-            if let id = authManager.currentUserID {
-                await CardRestoreService.refreshReported(userID: id, draftManager: draftManager)
-            }
-            await showPendingNotice()
+        .task { await refreshReportedAndNotice() }
+        .onChange(of: selectedTab) {
+            if selectedTab == .sent { Task { await refreshReportedAndNotice() } }
+        }
+        .onChange(of: scenePhase) {
+            if scenePhase == .active { Task { await refreshReportedAndNotice() } }
         }
     }
 
@@ -231,6 +233,15 @@ struct PostcardsView: View {
 
     // Complaint warnings / suspension notices written by the server. Shows the
     // newest unseen one (most recent is the most relevant) and marks all seen.
+    // Cheap server checks (a few bytes each), run whenever this screen shows,
+    // the Sent tab is selected, or the app returns to the foreground.
+    private func refreshReportedAndNotice() async {
+        if let id = authManager.currentUserID {
+            await CardRestoreService.refreshReported(userID: id, draftManager: draftManager)
+        }
+        await showPendingNotice()
+    }
+
     private func showPendingNotice() async {
         let notices = await UserNoticeService.fetchUnseen()
         guard let latest = notices.last else { return }

@@ -61,6 +61,10 @@ struct CardDropApp: App {
                         isSuspended = suspended
                     }
                 }
+                // Cards reported while the app was in the background.
+                if let idString = authManager.currentUserID {
+                    Task { await CardRestoreService.refreshReported(userID: idString, draftManager: draftManager) }
+                }
             }
             .task(id: authManager.currentUserID) {
                 if let idString = authManager.currentUserID,
@@ -70,8 +74,9 @@ struct CardDropApp: App {
                     }
                     draftManager.setUser(idString)
                     addressBook.setUser(idString)
+                    // Anonymous senders can have reported cards too.
+                    await CardRestoreService.refreshReported(userID: idString, draftManager: draftManager)
                     if !authManager.isAnonymous {
-                        await CardRestoreService.refreshReported(userID: idString, draftManager: draftManager)
                         await CardRestoreService.syncIfNeeded(userID: idString, draftManager: draftManager)
                     }
                     let sessionValid = await UserService.upsertUser(id: id)
