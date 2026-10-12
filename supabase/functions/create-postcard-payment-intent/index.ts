@@ -2,6 +2,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isBanned } from "../_shared/bans.ts";
 import { addressHash } from "../_shared/addressKey.ts";
 import { moderateContent } from "../_shared/moderation.ts";
+import { termsAccepted } from "../_shared/terms.ts";
 
 // Creates a physical_orders row (status: pending_payment) for a card being
 // mailed via LOB, then creates a matching Stripe PaymentIntent for the
@@ -42,6 +43,10 @@ Deno.serve(async (req) => {
     // Banned accounts (or accounts with a banned device) can't buy mail either.
     if (await isBanned(supabase, user, true)) {
       return json({ error: "suspended" }, 403);
+    }
+
+    if (!(await termsAccepted(supabase, user.id))) {
+      return json({ error: "terms_required" }, 403);
     }
 
     const { cardID, senderAddressID, recipientAddressID, size, promoCode } = await req.json();

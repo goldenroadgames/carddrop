@@ -19,11 +19,6 @@ struct LegalDocumentView: View {
             Group {
                 if let blocks {
                     VStack(alignment: .leading, spacing: 14) {
-                        if let lastModified, document != .help {
-                            Text("Last updated: \(Self.displayDateFormatter.string(from: lastModified))")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                        }
                         ForEach(blocks) { block in
                             blockView(block)
                         }

@@ -1,5 +1,7 @@
 # CardDrop Terms of Service
 
+*Last updated: 12 October 2026*
+
 These Terms of Service ("Terms") govern your use of the CardDrop mobile application and related website (together, the "Service"), operated by Golden Road Games LLC ("CardDrop," "we," "us," or "our"). By creating an account or using the Service, you agree to these Terms. If you do not agree, do not use the Service.
 
 ## 1. Eligibility

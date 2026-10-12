@@ -76,6 +76,9 @@ struct SendOptionsView: View {
     private enum DigitalSend { case email, text }
     @State private var pendingDigitalSend: DigitalSend? = nil
     @State private var showVerifyEmailForDigital = false
+    // First send needs the Terms agreement (TermsService); remembers what to do next.
+    @State private var showTermsSheet = false
+    @State private var pendingAfterTerms: (() -> Void)? = nil
     // True only when showCreateAccount was opened FROM the "Mail Real
     // Postcard" row (not the free-send-quota prompt) — lets its onSuccess
     // chain straight into OTP verification instead of just returning to
@@ -370,6 +373,24 @@ struct SendOptionsView: View {
             .environmentObject(draftManager)
             .environmentObject(addressBook)
         }
+        .sheet(isPresented: $showTermsSheet) {
+            TermsAcceptanceSheet(
+                onAgree: {
+                    showTermsSheet = false
+                    let next = pendingAfterTerms
+                    pendingAfterTerms = nil
+                    // Let the sheet finish dismissing before the next screen.
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 600_000_000)
+                        next?()
+                    }
+                },
+                onCancel: {
+                    showTermsSheet = false
+                    pendingAfterTerms = nil
+                }
+            )
+        }
         .sheet(isPresented: $showVerifyEmailForMail) {
             OTPVerificationView(
                 onSuccess: {
@@ -637,10 +658,25 @@ struct SendOptionsView: View {
     // first one, when the photo was picked, came before the user had chosen
     // between a digital send (resolution doesn't matter) and mailing.
     private func requestMailPostcard() {
-        if draft.isLowResolutionForPrint {
-            showLowResMailAlert = true
-        } else {
-            showMailPostcardFlow = true
+        withTerms {
+            if draft.isLowResolutionForPrint {
+                showLowResMailAlert = true
+            } else {
+                showMailPostcardFlow = true
+            }
+        }
+    }
+
+    // Runs `proceed` once the signed-in user has agreed to the Terms; shows the
+    // agreement sheet first if they haven't. The server enforces it as well.
+    private func withTerms(_ proceed: @escaping () -> Void) {
+        Task { @MainActor in
+            if await TermsService.isAccepted() {
+                proceed()
+            } else {
+                pendingAfterTerms = proceed
+                showTermsSheet = true
+            }
         }
     }
 
@@ -734,10 +770,14 @@ struct SendOptionsView: View {
     private func continueDigitalSend(_ kind: DigitalSend) {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 600_000_000)
-            switch kind {
-            case .email: sendEmail()
-            case .text:  sendText()
-            }
+            withTerms { runDigitalSend(kind) }
+        }
+    }
+
+    private func runDigitalSend(_ kind: DigitalSend) {
+        switch kind {
+        case .email: sendEmail()
+        case .text:  sendText()
         }
     }
 

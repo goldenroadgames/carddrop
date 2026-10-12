@@ -21,6 +21,7 @@ enum CardUploadService {
         case contentFlagged(warning: String?)
         case moderationUnavailable
         case rateLimited
+        case termsRequired
 
         var errorDescription: String? {
             switch self {
@@ -41,6 +42,8 @@ enum CardUploadService {
                 return warning.map { base + "\n\n" + $0 } ?? base
             case .moderationUnavailable:
                 return "We can't check your card right now. Please try again in a moment."
+            case .termsRequired:
+                return "Please agree to the Terms of Service to send cards, then tap Send again."
             case .rateLimited:
                 return "You're sending cards faster than we allow. Please try again in a little while. If you think this is a mistake, contact support@carddropapp.com."
             }
@@ -492,6 +495,7 @@ enum CardUploadService {
         case "content_flagged":        return .contentFlagged(warning: ModerationService.warningMessage(warning))
         case "moderation_unavailable": return .moderationUnavailable
         case "rate_limited":           return .rateLimited
+        case "terms_required":         return .termsRequired
         default:                       return .edgeFunctionFailed(code)
         }
     }

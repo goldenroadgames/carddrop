@@ -12,6 +12,9 @@ import { sendEmail } from "../_shared/resend.ts";
 // Orders that were (or are about to be) mailed.
 const MAILED_STATUSES = ["paid", "submitted_to_lob", "printed", "mailed", "delivered"];
 
+type Minor = "yes" | "no" | "not_sure";
+const MINOR_RANK: Record<Minor, number> = { no: 0, not_sure: 1, yes: 2 };
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CORS = {
@@ -33,6 +36,11 @@ Deno.serve(async (req) => {
     const blockAll = body.blockAll === true;
     const text = typeof body.text === "string" ? body.text.trim().slice(0, 2000) : "";
     if (!UUID_RE.test(cardID)) return json({ error: "invalid card" }, 400);
+    // Optional contact, kept only with a yes / not sure answer.
+    const contactRaw = typeof body.contact === "string" ? body.contact.trim().slice(0, 200) : "";
+    // "Does this card show or involve a child?" yes / no / not_sure (null = not asked).
+    const minor: Minor | null = body.involvesMinor === "yes" || body.involvesMinor === "no" || body.involvesMinor === "not_sure"
+      ? body.involvesMinor : null;
 
     const { data: card } = await supabase
       .from("cards")
@@ -51,11 +59,37 @@ Deno.serve(async (req) => {
     // Already reported? Only an upgrade to "block all senders" does anything.
     const { data: existing } = await supabase
       .from("card_complaints")
-      .select("id, block_all")
+      .select("id, block_all, involves_minor, decision")
       .eq("card_id", card.id)
       .maybeSingle();
 
     if (existing) {
+      // A card whose report was dismissed gets reported again: reopen the
+      // same complaint (it counts as a strike again and returns to the review
+      // list as unviewed), keeping the earlier history in card_view_log.
+      if (existing.decision === "dismissed") {
+        await supabase
+          .from("card_complaints")
+          .update({
+            decision: null, decided_at: null, decided_by: null, cleared_at: null, first_viewed_at: null,
+            involves_minor: minor,
+          })
+          .eq("id", existing.id);
+        await sendEmail(
+          Deno.env.get("ADMIN_ALERT_EMAIL") ?? "support@carddropapp.com",
+          (minor === "yes" || minor === "not_sure" ? "URGENT (child involved?) — " : "") + "CardDrop: dismissed report reopened",
+          `A card whose report you dismissed (${card.id}) was reported again.\n\nReview it: https://carddropapp.com/grg_admin/reported-cards`,
+        );
+      }
+      // A later report can only raise the child answer (yes > not sure > no),
+      // and a raise to yes / not sure sends the owner an urgent email.
+      if (minor && MINOR_RANK[minor] > MINOR_RANK[(existing.involves_minor as Minor | null) ?? "no"]) {
+        await supabase
+          .from("card_complaints")
+          .update({ involves_minor: minor, ...(minor !== "no" && contactRaw ? { reporter_contact: contactRaw } : {}) })
+          .eq("id", existing.id);
+        if (minor !== "no") await sendMinorAlert(card.id, minor);
+      }
       // Make sure the card is hidden even if this complaint predates the
       // reported_at column (idempotent: only stamps when still null).
       await supabase
@@ -85,6 +119,8 @@ Deno.serve(async (req) => {
       device_uuid:    card.device_uuid,
       complaint_text: text || null,
       block_all:      blockAll && mailed,
+      involves_minor: minor,
+      reporter_contact: (minor === "yes" || minor === "not_sure") && contactRaw ? contactRaw : null,
     });
     if (insertError) {
       // A concurrent duplicate report hits the unique card_id; that's fine.
@@ -121,10 +157,16 @@ Deno.serve(async (req) => {
     const strikes = Math.max(byAccount, byDevice);
 
     if (strikes >= threshold) {
+      // Say so in the ban reason when any counted complaint answered yes / not
+      // sure to "does this card involve a child?".
+      const childFlagged =
+        (card.sender_id && (await countChildFlagged(supabase, "sender_id", card.sender_id, since)) > 0) ||
+        (card.device_uuid && (await countChildFlagged(supabase, "device_uuid", card.device_uuid, since)) > 0);
+      const banReason = childFlagged ? "repeated recipient complaints (child flagged)" : "repeated recipient complaints";
       if (card.sender_id) {
         await supabase.rpc("ban_account", {
           p_user_id: card.sender_id,
-          p_reason: "repeated recipient complaints",
+          p_reason: banReason,
         });
       }
       if (card.device_uuid) {
@@ -133,7 +175,7 @@ Deno.serve(async (req) => {
             device_uuid: card.device_uuid,
             banned: true,
             banned_at: new Date().toISOString(),
-            ban_reason: "repeated recipient complaints",
+            ban_reason: banReason,
           },
           { onConflict: "device_uuid" },
         );
@@ -153,9 +195,12 @@ Deno.serve(async (req) => {
     // same card returned earlier). Goes to ADMIN_ALERT_EMAIL, else support.
     await sendEmail(
       Deno.env.get("ADMIN_ALERT_EMAIL") ?? "support@carddropapp.com",
-      strikes >= threshold ? "CardDrop: card reported, account suspended" : "CardDrop: card reported",
+      (minor === "yes" || minor === "not_sure" ? "URGENT (child involved?) — " : "") +
+        (strikes >= threshold ? "CardDrop: card reported, account suspended" : "CardDrop: card reported"),
       [
         `A card was reported (${mailed ? "mailed" : "digital"}).`,
+        ...((minor === "yes" || minor === "not_sure") && contactRaw ? [`Reporter left contact: ${contactRaw}`] : []),
+        ...(minor ? [`Reporter says a child is involved: ${minor === "not_sure" ? "NOT SURE" : minor.toUpperCase()}.`] : []),
         `Strikes on this sender: ${strikes} of ${threshold}${strikes >= threshold ? " (account auto-suspended)" : ""}.`,
         senderEmail ? `Sender: ${senderEmail}` : "Sender: no email (anonymous account)",
         ...(blockAll ? ["The reporter asked to block all senders from their address."] : []),
@@ -171,6 +216,34 @@ Deno.serve(async (req) => {
     return json({ error: "Internal server error" }, 500);
   }
 });
+
+async function countChildFlagged(
+  supabase: ReturnType<typeof createClient>,
+  column: "sender_id" | "device_uuid",
+  value: string,
+  since: string,
+): Promise<number> {
+  const { count } = await supabase
+    .from("card_complaints")
+    .select("id", { count: "exact", head: true })
+    .eq(column, value)
+    .is("cleared_at", null)
+    .in("involves_minor", ["yes", "not_sure"])
+    .gte("created_at", since);
+  return count ?? 0;
+}
+
+async function sendMinorAlert(cardID: string, minor: Minor) {
+  await sendEmail(
+    Deno.env.get("ADMIN_ALERT_EMAIL") ?? "support@carddropapp.com",
+    "URGENT (child involved?) — CardDrop: report updated",
+    [
+      `A later report on an already-reported card (${cardID}) now says a child is involved: ${minor === "not_sure" ? "NOT SURE" : "YES"}.`,
+      "",
+      "Review it: https://carddropapp.com/grg_admin/reported-cards",
+    ].join("\n"),
+  );
+}
 
 async function countComplaints(
   supabase: ReturnType<typeof createClient>,

@@ -3,6 +3,7 @@ import { isBanned } from "../_shared/bans.ts";
 import { moderateAndPromote } from "../_shared/cardImages.ts";
 import { recordContentBlock } from "../_shared/contentBlocks.ts";
 import { removeFolder } from "../_shared/purgeCard.ts";
+import { termsAccepted } from "../_shared/terms.ts";
 
 Deno.serve(async (req) => {
   try {
@@ -48,6 +49,11 @@ Deno.serve(async (req) => {
     const isVerified = isVerifiedUser(user);
     if (await isBanned(supabase, user, isVerified, deviceUUID)) {
       return json({ error: "suspended" }, 403);
+    }
+
+    // Must have accepted the current Terms (zz_config terms_required_version).
+    if (!(await termsAccepted(supabase, user.id))) {
+      return json({ error: "terms_required" }, 403);
     }
 
     // ----------------------------------------------------------------
