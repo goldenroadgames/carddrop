@@ -89,7 +89,13 @@ Deno.serve(async (req) => {
     // (default 30) after the suspension began, unless the ban is on legal hold.
     const finalSuspensions = await sweepFinalSuspensions(supabase);
 
-    return json({ purged, failed, reportedDeleted, retention, finalSuspensions });
+    // Appeals nobody reviewed are closed after appeal_auto_deny_days.
+    const staleAppeals = await closeStaleAppeals(supabase);
+
+    // Suspended accounts that were never appealed or reinstated: housekeeping.
+    const dormantSuspensions = await sweepDormantSuspensions(supabase);
+
+    return json({ purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions });
   } catch (err) {
     console.error("sweep-deleted-cards error:", err);
     return json({ error: "Internal server error" }, 500);
@@ -100,6 +106,29 @@ Deno.serve(async (req) => {
 // times (by account, or by verified email) and is suspended again. Only those
 // are deleted, never a suspension that can still be appealed. The ban rows are
 // kept (that is what keeps the person out); purged_at stops a repeat.
+// deno-lint-ignore no-explicit-any
+async function markFinalDevicesPermanent(supabase: any, maxReinstatements: number): Promise<void> {
+  const { data: active } = await supabase
+    .from("account_bans")
+    .select("user_id, email, final")
+    .is("reinstated_at", null)
+    .not("user_id", "is", null)
+    .limit(200);
+  for (const ban of active ?? []) {
+    let isFinal = !!ban.final;
+    if (!isFinal) {
+      const emailOk = ban.email && !/[,()]/.test(ban.email);
+      const { count } = await supabase
+        .from("account_bans")
+        .select("id", { count: "exact", head: true })
+        .not("reinstated_at", "is", null)
+        .or(`user_id.eq.${ban.user_id}${emailOk ? `,email.eq.${ban.email}` : ""}`);
+      isFinal = (count ?? 0) >= maxReinstatements;
+    }
+    if (isFinal) await supabase.from("user_devices").update({ permanent: true }).eq("user_id", ban.user_id);
+  }
+}
+
 // deno-lint-ignore no-explicit-any
 async function sweepFinalSuspensions(supabase: any): Promise<{ deleted: number; failed: number }> {
   const { data: cfgRows } = await supabase
@@ -112,9 +141,13 @@ async function sweepFinalSuspensions(supabase: any): Promise<{ deleted: number; 
   const maxReinstatements = cfg["appeal_max_reinstatements"] >= 0 ? cfg["appeal_max_reinstatements"] : 2;
   const cutoff = new Date(Date.now() - days * 86400000).toISOString();
 
+  // Devices of every final suspension become permanent as soon as the sweeper
+  // sees it, not only at deletion time.
+  await markFinalDevicesPermanent(supabase, maxReinstatements);
+
   const { data: bans } = await supabase
     .from("account_bans")
-    .select("user_id, email")
+    .select("user_id, email, final")
     .is("reinstated_at", null)
     .eq("legal_hold", false)
     .is("purged_at", null)
@@ -125,13 +158,20 @@ async function sweepFinalSuspensions(supabase: any): Promise<{ deleted: number; 
   let deleted = 0;
   let failed = 0;
   for (const ban of bans ?? []) {
-    const emailOk = ban.email && !/[,()]/.test(ban.email);
-    const { count } = await supabase
-      .from("account_bans")
-      .select("id", { count: "exact", head: true })
-      .not("reinstated_at", "is", null)
-      .or(`user_id.eq.${ban.user_id}${emailOk ? `,email.eq.${ban.email}` : ""}`);
-    if ((count ?? 0) < maxReinstatements) continue; // can still appeal: not final
+    // Final by hand (final flag) or by count (reinstated maxReinstatements times).
+    if (!ban.final) {
+      const emailOk = ban.email && !/[,()]/.test(ban.email);
+      const { count } = await supabase
+        .from("account_bans")
+        .select("id", { count: "exact", head: true })
+        .not("reinstated_at", "is", null)
+        .or(`user_id.eq.${ban.user_id}${emailOk ? `,email.eq.${ban.email}` : ""}`);
+      if ((count ?? 0) < maxReinstatements) continue; // can still appeal: not final
+    }
+
+    // Mark the account's devices permanent BEFORE deleting (deleting the users
+    // row clears user_devices.user_id).
+    await supabase.from("user_devices").update({ permanent: true }).eq("user_id", ban.user_id);
 
     const result = await deleteAccountData(supabase, ban.user_id);
     if (!result.ok) {
@@ -147,6 +187,92 @@ async function sweepFinalSuspensions(supabase: any): Promise<{ deleted: number; 
     deleted++;
   }
   return { deleted, failed };
+}
+
+// A suspension that is still active suspension_delete_days (default 180) after it
+// began, with no open appeal and no legal hold, has its account data deleted
+// (same routine and kept records as a final suspension). purged_at stops a
+// repeat; the ban rows stay.
+// deno-lint-ignore no-explicit-any
+async function sweepDormantSuspensions(supabase: any): Promise<{ deleted: number; failed: number }> {
+  const { data: cfg } = await supabase
+    .from("zz_config")
+    .select("value")
+    .eq("key", "suspension_delete_days")
+    .maybeSingle();
+  const parsed = parseInt(cfg?.value ?? "", 10);
+  const days = parsed > 0 ? parsed : 180;
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+
+  const { data: bans } = await supabase
+    .from("account_bans")
+    .select("user_id")
+    .is("reinstated_at", null)
+    .eq("legal_hold", false)
+    .is("purged_at", null)
+    .not("user_id", "is", null)
+    .lt("created_at", cutoff)
+    .limit(50);
+
+  let deleted = 0;
+  let failed = 0;
+  for (const ban of bans ?? []) {
+    // An unanswered appeal means the person is still engaged: leave it alone.
+    const { count: openAppeals } = await supabase
+      .from("ban_reviews")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", ban.user_id)
+      .is("resolved_at", null);
+    if ((openAppeals ?? 0) > 0) continue;
+
+    const result = await deleteAccountData(supabase, ban.user_id);
+    if (!result.ok) {
+      console.error("dormant-suspension delete failed:", ban.user_id, result.step, result.message);
+      failed++;
+      continue;
+    }
+    await supabase
+      .from("account_bans")
+      .update({ purged_at: new Date().toISOString() })
+      .eq("user_id", ban.user_id)
+      .is("reinstated_at", null);
+    deleted++;
+  }
+  return { deleted, failed };
+}
+
+// Closes appeals that have waited longer than appeal_auto_deny_days (default 30,
+// 0 = never) without a decision. Recorded as denied, with a note that says it
+// was not reviewed in time (auto_closed: the app shows a fixed message saying so), so the usual 30-day
+// wait before another appeal applies (submit-appeal enforces it from resolved_at).
+// deno-lint-ignore no-explicit-any
+async function closeStaleAppeals(supabase: any): Promise<{ closed: number }> {
+  const { data: cfg } = await supabase
+    .from("zz_config")
+    .select("value")
+    .eq("key", "appeal_auto_deny_days")
+    .maybeSingle();
+  const parsed = parseInt(cfg?.value ?? "", 10);
+  const days = parsed >= 0 ? parsed : 30;
+  if (days === 0) return { closed: 0 };
+
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const { data: closed, error } = await supabase
+    .from("ban_reviews")
+    .update({
+      resolved_at: new Date().toISOString(),
+      outcome: "denied",
+      resolution: "Auto-closed: not reviewed within " + days + " days.",
+      auto_closed: true,
+    })
+    .is("resolved_at", null)
+    .lt("created_at", cutoff)
+    .select("id");
+  if (error) {
+    console.error("close stale appeals error:", error.message);
+    return { closed: 0 };
+  }
+  return { closed: (closed ?? []).length };
 }
 
 function json(body: unknown, status = 200): Response {

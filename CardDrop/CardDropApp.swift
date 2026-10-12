@@ -30,17 +30,28 @@ struct CardDropApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if suspension.isSuspended {
-                    SuspendedView()
+                if suspension.isSuspended || suspension.devicePermanent {
+                    // A permanently disabled phone is always the minimal "Account
+                    // Disabled" screen, signed in or not.
+                    SuspendedView(forceFinal: suspension.devicePermanent)
                         .environmentObject(authManager)
                         .environmentObject(draftManager)
                         .environmentObject(addressBook)
                 } else if authManager.isAuthenticated && (!authManager.isAnonymous || didSkipAuth) {
-                    MainTabView()
-                        .environmentObject(authManager)
-                        .environmentObject(addressBook)
-                        .environmentObject(draftManager)
-                        .environmentObject(appSettings)
+                    if suspension.hasChecked {
+                        MainTabView()
+                            .environmentObject(authManager)
+                            .environmentObject(addressBook)
+                            .environmentObject(draftManager)
+                            .environmentObject(appSettings)
+                    } else {
+                        // Held for the first suspension answer so a suspended
+                        // account never flashes the gallery (2-second cap).
+                        ZStack {
+                            Color(uiColor: .systemBackground).ignoresSafeArea()
+                            ProgressView()
+                        }
+                    }
                 } else {
                     AuthView(onSkip: { didSkipAuth = true })
                         .environmentObject(authManager)
@@ -52,6 +63,12 @@ struct CardDropApp: App {
             // accessibility "Larger Text" setting — this app's layouts are pixel-tuned
             // and don't tolerate Dynamic Type scaling.
             .dynamicTypeSize(.large)
+            .animation(.easeIn(duration: 0.2), value: suspension.hasChecked)
+            .task {
+                // Never hold the app on the spinner if the server is slow or offline.
+                try? await Task.sleep(for: .seconds(2))
+                suspension.markChecked()
+            }
             // A suspension can land while the app is backgrounded (the 3rd complaint),
             // so recheck whenever it comes back to the foreground.
             .onChange(of: scenePhase) {
@@ -65,6 +82,10 @@ struct CardDropApp: App {
             .task(id: authManager.currentUserID) {
                 if let idString = authManager.currentUserID,
                    let id = UUID(uuidString: idString) {
+                    // Ask about suspension FIRST, in parallel with the setup below.
+                    // It used to be the last step, so a suspended account saw the
+                    // gallery until all the syncing finished.
+                    Task { await suspension.recheck(force: true) }
                     if authManager.isAnonymous {
                         UserService.handleNewAnonymousSession(newID: idString)
                     }
@@ -87,6 +108,8 @@ struct CardDropApp: App {
                 } else {
                     draftManager.clearUser()
                     addressBook.clearUser()
+                    // Signed out: ask about the phone itself, before any account exists.
+                    await suspension.recheckDevice()
                 }
             }
         }

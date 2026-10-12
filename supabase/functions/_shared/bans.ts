@@ -34,13 +34,15 @@ export async function isBanned(
   }
 
   let deviceBanned = false;
+  let devicePermanent = false;
   if (deviceUUID) {
     const { data: deviceRow } = await supabase
       .from("user_devices")
-      .select("banned")
+      .select("banned, permanent")
       .eq("device_uuid", deviceUUID)
       .maybeSingle();
     deviceBanned = deviceRow?.banned === true;
+    devicePermanent = deviceRow?.permanent === true;
   }
   if (!deviceBanned) {
     const { data: linked } = await supabase
@@ -56,6 +58,15 @@ export async function isBanned(
   if (deviceBanned) {
     // Flag the account too (ban_account ignores a duplicate active ban).
     await supabase.rpc("ban_account", { p_user_id: user.id, p_reason: "device banned" });
+    // A device where a final suspension happened is permanent: a new account on
+    // it is final too (no appeal).
+    if (devicePermanent) {
+      await supabase
+        .from("account_bans")
+        .update({ final: true, final_reason: "Permanent device" })
+        .eq("user_id", user.id)
+        .is("reinstated_at", null);
+    }
     return true;
   }
   return false;

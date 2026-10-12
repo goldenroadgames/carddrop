@@ -4,14 +4,26 @@ import Supabase
 /// Shown instead of the whole app when the account or device is suspended.
 /// A suspended user can still delete their account (App Store 5.1.1(v) and
 /// privacy law still apply), appeal the suspension with the form below, and
-/// read Help, the Terms and the Privacy Policy.
+/// read Help, the Terms and the Privacy Policy. A FINAL suspension (no appeal
+/// left, or a permanently banned device) gets the minimal "Account Disabled"
+/// screen: one line, the legal links, and Delete Account only for a real login.
 struct SuspendedView: View {
+    /// True for a permanently disabled phone (known without a login): straight
+    /// to the minimal "Account Disabled" screen, no server calls for appeals.
+    var forceFinal = false
+
+    @EnvironmentObject private var authManager: AuthManager
     @State private var showLegal: LegalDocumentService.Document?
     @State private var showAppealForm = false
     @State private var appeal: AppealService.Appeal?
     @State private var appealLoaded = false
     // False once the account has used up its reinstatements: this suspension is final.
     @State private var canAppeal = true
+    // "about six months" / "about a month": how long until the account data is
+    // deleted, read from the same settings the server uses.
+    @State private var deletionPhrase: String?
+
+    private var isFinal: Bool { forceFinal || (appealLoaded && !canAppeal) }
 
     private var hasOpenAppeal: Bool {
         guard let appeal else { return false }
@@ -34,18 +46,34 @@ struct SuspendedView: View {
             Image(systemName: "hand.raised.fill")
                 .font(.system(size: 56))
                 .foregroundColor(.secondary)
-            Text("Account Suspended")
-                .font(.title2.weight(.semibold))
-            Text("Your account has been suspended for violating our content standards or complaints about cards you sent.")
-                .font(.body)
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
+            if isFinal {
+                Text("Account Disabled")
+                    .font(.title2.weight(.semibold))
+                Text("This account has been disabled.")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+                // An empty anonymous account has nothing to delete; a real login
+                // (email or Apple) keeps the option (App Store 5.1.1(v)).
+                if !authManager.isAnonymous {
+                    DeleteAccountButton()
+                        .font(.body)
+                        .padding(.top, 8)
+                }
+            } else {
+                Text("Account Suspended")
+                    .font(.title2.weight(.semibold))
+                Text("Your account has been suspended for violating our content standards or complaints about cards you sent.")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
 
-            appealSection
+                appealSection
 
-            DeleteAccountButton()
-                .font(.body)
-                .padding(.top, 8)
+                DeleteAccountButton()
+                    .font(.body)
+                    .padding(.top, 8)
+            }
             Spacer()
             HStack(spacing: 4) {
                 Button("Help") { showLegal = .help }
@@ -60,7 +88,17 @@ struct SuspendedView: View {
         }
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Hidden behind a spinner until the appeal status is known, so the
+        // screen doesn't jump when the Appeal section appears.
+        .opacity(appealLoaded || forceFinal ? 1 : 0)
+        .overlay { if !(appealLoaded || forceFinal) { ProgressView() } }
+        .animation(.easeIn(duration: 0.2), value: appealLoaded)
         .task { await refreshAppeal() }
+        .task {
+            // Fallback: never leave the screen blank if the server is slow.
+            try? await Task.sleep(for: .seconds(3))
+            appealLoaded = true
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task { await refreshAppeal() }
         }
@@ -93,19 +131,25 @@ struct SuspendedView: View {
                     .foregroundColor(.secondary)
             }
             .multilineTextAlignment(.center)
-        } else if appealLoaded && !canAppeal {
-            Text("This suspension is final.")
-                .font(.body.weight(.semibold))
-                .multilineTextAlignment(.center)
         } else if appealLoaded {
             if let appeal, appeal.outcome == "denied" {
                 VStack(spacing: 4) {
                     Text("Your appeal was reviewed and the suspension stays in place.")
                         .font(.body)
                         .foregroundColor(.secondary)
-                    if let note = appeal.resolution, !note.isEmpty {
-                        Text(note)
+                    // An appeal the sweeper closed unreviewed says so. The admin's
+                    // note is internal: the app can't even read that column.
+                    if appeal.auto_closed == true {
+                        Text("It wasn't reviewed in time and has been closed.")
                             .font(.body)
+                            .foregroundColor(.secondary)
+                    }
+                    // A denied user can appeal again 30 days after the decision
+                    // (the server enforces it); until then no button.
+                    if let retryDate = appealRetryDate {
+                        Text("You can appeal again after \(retryDate.formatted(date: .abbreviated, time: .omitted)).")
+                            .font(.body)
+                            .foregroundColor(.secondary)
                     }
                 }
                 .multilineTextAlignment(.center)
@@ -115,14 +159,33 @@ struct SuspendedView: View {
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
             }
-            Button("Appeal This Decision") { showAppealForm = true }
-                .font(.body.weight(.semibold))
+            if appealRetryDate == nil {
+                Button("Appeal This Decision") { showAppealForm = true }
+                    .font(.body.weight(.semibold))
+            }
+            if let deletionPhrase {
+                Text("If you don't appeal, your account data will be deleted after \(deletionPhrase).")
+                    .font(.footnote)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 
+    /// When a denied appeal can be repeated (30 days after the decision), or nil
+    /// if the latest appeal wasn't denied or the wait is over.
+    private var appealRetryDate: Date? {
+        guard let appeal, appeal.outcome == "denied", let resolved = appeal.resolved_at,
+              let retry = Calendar.current.date(byAdding: .day, value: 30, to: resolved),
+              retry > Date() else { return nil }
+        return retry
+    }
+
     private func refreshAppeal() async {
+        if forceFinal { appealLoaded = true; return }
         appeal = await AppealService.latest()
         canAppeal = await AppealService.canAppeal()
+        deletionPhrase = await AppealService.deletionPhrase(final: false)
         appealLoaded = true
     }
 }
@@ -220,7 +283,7 @@ enum AppealService {
         let created_at: Date?
         let resolved_at: Date?
         let outcome: String?       // "reinstated" | "denied" once decided
-        let resolution: String?    // the note shown to the user
+        let auto_closed: Bool?     // closed by the sweeper without a review
     }
 
     enum SubmitResult { case sent, alreadyOpen, cooldown, notAllowed, failed }
@@ -230,7 +293,7 @@ enum AppealService {
         guard let userID = try? await supabase.auth.session.user.id else { return nil }
         let rows: [Appeal]? = try? await supabase
             .from("ban_reviews")
-            .select("message, created_at, resolved_at, outcome, resolution")
+            .select("message, created_at, resolved_at, outcome, auto_closed")
             .eq("user_id", value: userID.uuidString)
             .order("created_at", ascending: false)
             .limit(1)
@@ -249,6 +312,25 @@ enum AppealService {
         let status: String?
         let error: String?
         let canAppeal: Bool?
+    }
+
+    private struct ConfigRow: Decodable { let value: String }
+
+    /// "about 180 days": how long until a suspended account's data is deleted,
+    /// from zz_config (suspension_delete_days for an unappealed suspension,
+    /// final_suspension_delete_days for a final one). Falls back to the
+    /// defaults (180 / 30) if the lookup fails.
+    static func deletionPhrase(final: Bool) async -> String {
+        let key = final ? "final_suspension_delete_days" : "suspension_delete_days"
+        let row = try? await supabase
+            .from("zz_config")
+            .select("value")
+            .eq("key", value: key)
+            .single()
+            .execute()
+            .value as ConfigRow
+        let days = row.flatMap { Int($0.value) }.flatMap { $0 > 0 ? $0 : nil } ?? (final ? 30 : 180)
+        return "about \(days) days"
     }
 
     /// Whether an appeal can still be made for this suspension. False once the

@@ -65,7 +65,14 @@ Deno.serve(async (req) => {
       .select("id", { count: "exact", head: true })
       .not("reinstated_at", "is", null)
       .or(`user_id.eq.${user.id}${emailFilter}`);
-    const canAppeal = (reinstated ?? 0) < maxReinstatements;
+    // An admin can also mark the current suspension final by hand.
+    const { count: markedFinal } = await supabase
+      .from("account_bans")
+      .select("id", { count: "exact", head: true })
+      .is("reinstated_at", null)
+      .eq("final", true)
+      .or(`user_id.eq.${user.id}${emailFilter}`);
+    const canAppeal = (reinstated ?? 0) < maxReinstatements && (markedFinal ?? 0) === 0;
     if (checkOnly) return json({ canAppeal });
     if (!canAppeal) return json({ error: "no_appeals" }, 403);
 

@@ -9,6 +9,25 @@ enum SuspensionService {
         let p_device: String
     }
 
+    private nonisolated struct DeviceParams: Encodable {
+        let p_device: String
+    }
+
+    /// Whether this phone is permanently disabled (a final suspension happened
+    /// on it). Works signed out, so a disabled phone opens straight onto the
+    /// Account Disabled screen with no account created. nil if it couldn't ask.
+    static func isDevicePermanent() async -> Bool? {
+        do {
+            let permanent: Bool = try await supabase
+                .rpc("device_is_permanent", params: DeviceParams(p_device: UserService.deviceUUID.uuidString))
+                .execute()
+                .value
+            return permanent
+        } catch {
+            return nil
+        }
+    }
+
     /// nil when the check couldn't complete (offline, signed out) so callers
     /// can keep their previous answer instead of flipping on a network blip.
     static func isSuspended() async -> Bool? {
