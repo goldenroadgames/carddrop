@@ -13,6 +13,7 @@ struct SuspendedView: View {
     var forceFinal = false
 
     @EnvironmentObject private var authManager: AuthManager
+    @ObservedObject private var monitor = SuspensionMonitor.shared
     @State private var showLegal: LegalDocumentService.Document?
     @State private var showAppealForm = false
     @State private var appeal: AppealService.Appeal?
@@ -23,7 +24,9 @@ struct SuspendedView: View {
     // deleted, read from the same settings the server uses.
     @State private var deletionPhrase: String?
 
-    private var isFinal: Bool { forceFinal || (appealLoaded && !canAppeal) }
+    // Until the server answers, the remembered answer decides, so a final account
+    // never flashes the ordinary Suspended page.
+    private var isFinal: Bool { forceFinal || (appealLoaded ? !canAppeal : monitor.knownFinal) }
 
     private var hasOpenAppeal: Bool {
         guard let appeal else { return false }
@@ -90,13 +93,13 @@ struct SuspendedView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Hidden behind a spinner until the appeal status is known, so the
         // screen doesn't jump when the Appeal section appears.
-        .opacity(appealLoaded || forceFinal ? 1 : 0)
-        .overlay { if !(appealLoaded || forceFinal) { ProgressView() } }
+        .opacity(appealLoaded || forceFinal || monitor.knownFinal ? 1 : 0)
+        .overlay { if !(appealLoaded || forceFinal || monitor.knownFinal) { ProgressView() } }
         .animation(.easeIn(duration: 0.2), value: appealLoaded)
         .task { await refreshAppeal() }
         .task {
             // Fallback: never leave the screen blank if the server is slow.
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(6))
             appealLoaded = true
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
@@ -120,54 +123,48 @@ struct SuspendedView: View {
 
     // MARK: - Appeal
 
-    @ViewBuilder
-    private var appealSection: some View {
+    // Everything under the first paragraph is ONE paragraph (same font and color):
+    // the appeal status, then "If you don't appeal..." when an appeal is still
+    // possible. The Appeal button sits below it as a separate control.
+    private var appealParagraph: String {
+        var parts: [String] = []
         if hasOpenAppeal {
-            VStack(spacing: 4) {
-                Text("Appeal received")
-                    .font(.body.weight(.semibold))
-                Text("We'll review it and update this screen.")
-                    .font(.body)
-                    .foregroundColor(.secondary)
-            }
-            .multilineTextAlignment(.center)
-        } else if appealLoaded {
+            parts.append("Appeal received. We'll review it and update this screen.")
+        } else {
             if let appeal, appeal.outcome == "denied" {
-                VStack(spacing: 4) {
-                    Text("Your appeal was reviewed and the suspension stays in place.")
-                        .font(.body)
-                        .foregroundColor(.secondary)
-                    // An appeal the sweeper closed unreviewed says so. The admin's
-                    // note is internal: the app can't even read that column.
-                    if appeal.auto_closed == true {
-                        Text("It wasn't reviewed in time and has been closed.")
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                    }
-                    // A denied user can appeal again 30 days after the decision
-                    // (the server enforces it); until then no button.
-                    if let retryDate = appealRetryDate {
-                        Text("You can appeal again after \(retryDate.formatted(date: .abbreviated, time: .omitted)).")
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                    }
+                // An appeal the sweeper closed unreviewed says so (and never claims
+                // it was reviewed). The admin's note is internal: the app can't
+                // even read that column.
+                if appeal.auto_closed == true {
+                    parts.append("Your appeal wasn't reviewed in time and has been closed, and your account is still suspended.")
+                } else {
+                    parts.append("Your appeal was denied and your account is still suspended.")
                 }
-                .multilineTextAlignment(.center)
+                // A denied user can appeal again 30 days after the decision (the
+                // server enforces it); until then no button.
+                if let retryDate = appealRetryDate {
+                    parts.append("You can appeal again after \(retryDate.formatted(date: .abbreviated, time: .omitted)).")
+                }
             } else {
-                Text("If you think this was a mistake, you can appeal.")
-                    .font(.body)
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(.secondary)
-            }
-            if appealRetryDate == nil {
-                Button("Appeal This Decision") { showAppealForm = true }
-                    .font(.body.weight(.semibold))
+                parts.append("If you think this was a mistake, you can appeal.")
             }
             if let deletionPhrase {
-                Text("If you don't appeal, your account data will be deleted after \(deletionPhrase).")
-                    .font(.footnote)
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(.secondary)
+                parts.append("If you don't appeal, your account data will be deleted after \(deletionPhrase).")
+            }
+        }
+        return parts.joined(separator: " ")
+    }
+
+    @ViewBuilder
+    private var appealSection: some View {
+        if appealLoaded {
+            Text(appealParagraph)
+                .font(.body)
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+            if !hasOpenAppeal && appealRetryDate == nil {
+                Button("Appeal This Decision") { showAppealForm = true }
+                    .font(.body.weight(.semibold))
             }
         }
     }
@@ -183,9 +180,19 @@ struct SuspendedView: View {
 
     private func refreshAppeal() async {
         if forceFinal { appealLoaded = true; return }
-        appeal = await AppealService.latest()
-        canAppeal = await AppealService.canAppeal()
-        deletionPhrase = await AppealService.deletionPhrase(final: false)
+        // The three questions are asked at the same time, not one after another.
+        async let latest = AppealService.latest()
+        async let eligible = AppealService.canAppeal()
+        async let phrase = AppealService.deletionPhrase(final: false)
+        appeal = await latest
+        deletionPhrase = await phrase
+        // nil = couldn't ask (offline): keep what we knew rather than guess.
+        if let eligible = await eligible {
+            canAppeal = eligible
+            monitor.setKnownFinal(!eligible)
+        } else if monitor.knownFinal {
+            canAppeal = false
+        }
         appealLoaded = true
     }
 }
@@ -335,13 +342,13 @@ enum AppealService {
 
     /// Whether an appeal can still be made for this suspension. False once the
     /// account has been reinstated the allowed number of times (a final
-    /// suspension). If the check fails, the form stays available; the server
-    /// refuses a disallowed appeal anyway.
-    static func canAppeal() async -> Bool {
+    /// suspension). nil if the check couldn't complete (the server refuses a
+    /// disallowed appeal anyway).
+    static func canAppeal() async -> Bool? {
         let body = SubmitBody(message: nil, deviceUUID: UserService.deviceUUID.uuidString, check: true)
         let response: SubmitResponse? = try? await supabase.functions
             .invoke("submit-appeal", options: FunctionInvokeOptions(body: body))
-        return response?.canAppeal ?? true
+        return response?.canAppeal
     }
 
     static func submit(message: String) async -> SubmitResult {

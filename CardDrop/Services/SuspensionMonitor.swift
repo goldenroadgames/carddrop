@@ -17,6 +17,18 @@ final class SuspensionMonitor: ObservableObject {
     private static let lastKnownKey = "suspension.lastKnown"
     @Published private(set) var isSuspended = UserDefaults.standard.bool(forKey: "suspension.lastKnown")
 
+    // The last answer about whether the suspension is FINAL (no appeal left),
+    // remembered so a final account opens straight onto the minimal Account
+    // Disabled screen. The Suspended screen re-verifies it with the server and
+    // corrects it if it changed; reinstatement clears it.
+    private static let knownFinalKey = "suspension.knownFinal"
+    @Published private(set) var knownFinal = UserDefaults.standard.bool(forKey: "suspension.knownFinal")
+
+    func setKnownFinal(_ value: Bool) {
+        knownFinal = value
+        UserDefaults.standard.set(value, forKey: Self.knownFinalKey)
+    }
+
     // True when this phone is permanently disabled (a final suspension happened
     // on it). Remembered across launches like isSuspended, but only the server's
     // answer clears it.
@@ -52,6 +64,7 @@ final class SuspensionMonitor: ObservableObject {
         if let suspended = await SuspensionService.isSuspended() {
             isSuspended = suspended
             UserDefaults.standard.set(suspended, forKey: Self.lastKnownKey)
+            if !suspended { setKnownFinal(false) }
             lastCheck = Date()
         } else if supabase.auth.currentSession == nil {
             // Signed out (e.g. the account was deleted): nothing to be suspended
