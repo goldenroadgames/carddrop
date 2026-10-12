@@ -126,37 +126,47 @@ Deno.serve(async (req) => {
     }
 
     // ----------------------------------------------------------------
-    // Send-rate cap: send-card calls per hour / per day for this sender,
-    // counted from send_events (server-written, no foreign key to cards, so
-    // resending a card counts again and deleting a card resets nothing).
-    // Applies to every tier. Each call that gets past this check is recorded,
-    // including ones the content gate later rejects.
+    // Send-rate cap: send-card calls per hour / per day, counted from
+    // send_events (server-written, no foreign key to cards, so resending a
+    // card counts again and deleting a card resets nothing). The same limits
+    // apply to the account and to the device, whichever is reached first
+    // (deviceUUID comes from the app, so the device cap is a backstop, not
+    // proof of identity). Applies to every tier. Each call that gets past this
+    // check is recorded, including ones the content gate later rejects.
     // ----------------------------------------------------------------
     {
       const { data: rateRows } = await supabase
         .from("zz_config")
         .select("key, value")
-        .in("key", ["send_rate_hourly", "send_rate_daily"]);
+        .in("key", ["send_rate_hourly", "send_rate_daily", "send_rate_device_hourly", "send_rate_device_daily"]);
       const rate: Record<string, number> = {};
       for (const row of rateRows ?? []) rate[row.key] = parseInt(row.value, 10);
       const hourlyCap = rate["send_rate_hourly"] ?? 10;
       const dailyCap  = rate["send_rate_daily"]  ?? 50;
+      // Device caps have their own settings; unset, they match the account caps.
+      const deviceHourlyCap = rate["send_rate_device_hourly"] ?? hourlyCap;
+      const deviceDailyCap  = rate["send_rate_device_daily"]  ?? dailyCap;
 
-      const countSince = async (ms: number) => {
+      const countSince = async (column: "user_id" | "device_uuid", value: string, ms: number) => {
         const { count } = await supabase
           .from("send_events")
           .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id)
+          .eq(column, value)
           .gte("created_at", new Date(Date.now() - ms).toISOString());
         return count ?? 0;
       };
-      if (hourlyCap >= 0 && await countSince(60 * 60 * 1000) >= hourlyCap) {
-        return json({ error: "rate_limited", window: "hour" }, 429);
+      for (const [column, value, hCap, dCap] of [
+        ["user_id", user.id, hourlyCap, dailyCap],
+        ["device_uuid", deviceUUID, deviceHourlyCap, deviceDailyCap],
+      ] as const) {
+        if (hCap >= 0 && await countSince(column, value, 60 * 60 * 1000) >= hCap) {
+          return json({ error: "rate_limited", window: "hour" }, 429);
+        }
+        if (dCap >= 0 && await countSince(column, value, 24 * 60 * 60 * 1000) >= dCap) {
+          return json({ error: "rate_limited", window: "day" }, 429);
+        }
       }
-      if (dailyCap >= 0 && await countSince(24 * 60 * 60 * 1000) >= dailyCap) {
-        return json({ error: "rate_limited", window: "day" }, 429);
-      }
-      await supabase.from("send_events").insert({ user_id: user.id, card_id: cardID });
+      await supabase.from("send_events").insert({ user_id: user.id, device_uuid: deviceUUID, card_id: cardID });
     }
 
     // ----------------------------------------------------------------
