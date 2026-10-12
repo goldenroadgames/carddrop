@@ -4,7 +4,7 @@ These Terms of Service ("Terms") govern your use of the CardDrop mobile applicat
 
 ## 1. Eligibility
 
-You must be at least 13 years old to use the Service. If you are under the age of majority in your jurisdiction, you may only use the Service with the involvement of a parent or guardian. By using the Service, you represent that you meet these requirements.
+You must be at least 13 years old to use the Service. If you are under the age of majority in your jurisdiction, you may only use the Service with the involvement of a parent or guardian. By using the Service, you represent that you meet these requirements. The Service is intended for use in the United States.
 
 ## 2. The Service
 
@@ -67,7 +67,7 @@ The Service itself, including its software, design, branding, and content we cre
 
 ## 10. Termination
 
-You may stop using the Service or delete your account at any time. We may suspend or terminate your access to the Service if you violate these Terms or are reported repeatedly by recipients, at our discretion, with or without notice. While an account is suspended, the links to all of its cards stop working. We may, but are not required to, review a suspension or restore an account; you can contact support at the address below. We may keep a record of a suspension, including a verified email address, so that a suspended person cannot create a new account. Sections of these Terms that by their nature should survive termination (including Sections 5, 9, 11, and 12) will survive.
+You may stop using the Service or delete your account at any time. We may suspend or terminate your access to the Service if you violate these Terms or are reported repeatedly by recipients, at our discretion, with or without notice. While an account is suspended, the links to all of its cards stop working. We may, but are not required to, review a suspension or restore an account; you can ask for a review using the appeal form on the Account Suspended screen in the app, or contact support at the address below. We may decline to review a repeat suspension. We may keep a record of a suspension, including a verified email address, so that a suspended person cannot create a new account. If we terminate an account, we may delete it and its content, except for the records described in our Privacy Policy. Sections of these Terms that by their nature should survive termination (including Sections 5, 9, 11, and 12) will survive.
 
 ## 11. Disclaimers and Limitation of Liability
 

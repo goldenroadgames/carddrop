@@ -14,7 +14,7 @@ This Privacy Policy explains how Golden Road Games LLC ("CardDrop," "we," "us," 
 
 **Usage and device information.** We may collect standard technical information such as device type, operating system version, app version, and crash/diagnostic data to help us maintain and improve the Service.
 
-**Safety and abuse-prevention records.** To prevent abuse we keep: an identifier for your device (stored in your phone's secure storage, where it can survive deleting and reinstalling the app); a record of each card you send (which card, when, and how — text, email, link, or mail; for digital cards we do not know who the recipient is, because they are sent from your own phone's messaging and email apps); how many cards you have sent; any report made about a card you sent, including the text of the report; and a record each time our automated check blocks something you submit (your account and device, whether it was a photo or text, the category, and the time, but not the content itself). People who report a card are not asked for their name or contact details.
+**Safety and abuse-prevention records.** To prevent abuse we keep: an identifier for your device (stored in your phone's secure storage, where it can survive deleting and reinstalling the app); a record of each card you send (which card, when, and how — text, email, link, or mail; for digital cards we do not know who the recipient is, because they are sent from your own phone's messaging and email apps); how many cards you have sent; any report made about a card you sent, including the text of the report; and a record each time our automated check blocks something you submit (your account and device, whether it was a photo or text, the category, and the time, but not the content itself); and, if you appeal a suspension, your appeal message and our answer. People who report a card are not asked for their name or contact details.
 
 **Replies and reactions.** People who open one of your card links can reply with text, a photo, or an emoji reaction. We collect what they send and the time. We do not ask for their name or contact details. Photos are shrunk on their device before upload, which removes location data. We do not keep who sent a reply.
 
@@ -76,7 +76,7 @@ Some records are kept for a set period, even if you delete a card or your accoun
 
 ## 7. Your Choices and Rights
 
-Depending on your location, you may have the right to access, correct, delete, or export your personal information. You can manage most of this directly in the app (editing or deleting saved addresses, drafts, your account, or your marketing-use preference described in Section 5). You can delete your account at any time in the app (Profile, then Delete Account). This deletes your account, your cards and their shared links, your saved addresses, and your files, except for the records described in Section 6 and any copies already featured in our marketing (Section 5). To request access to your data or any other change, contact us at support@carddropapp.com.
+Depending on your location, you may have the right to access, correct, delete, or export your personal information. You can manage most of this directly in the app (editing or deleting saved addresses, drafts, your account, or your marketing-use preference described in Section 5). You can delete your account at any time in the app (Profile, then Delete Account). This deletes your account, your cards and their shared links, your saved addresses, and your files, except for the records described in Section 6 and any copies already featured in our marketing (Section 5). This policy describes what we collect and keep. If you have questions about your data, or want a change we can't make in the app, contact us at support@carddropapp.com and we'll try to help.
 
 ## 8. Children's Privacy
 
@@ -88,7 +88,7 @@ We use reasonable technical and organizational measures to protect your informat
 
 ## 10. International Users
 
-If you access the Service from outside the United States, your information may be transferred to and processed in the United States, which may have different data protection laws than your country of residence.
+The Service is intended for use in the United States. If you access the Service from outside the United States, your information may be transferred to and processed in the United States, which may have different data protection laws than your country of residence.
 
 ## 11. Changes to This Policy
 

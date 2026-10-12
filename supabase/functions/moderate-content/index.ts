@@ -61,6 +61,7 @@ Deno.serve(async (req) => {
         text: verdict.text,
         categories: verdict.categories,
         fingerprints: verdict.fingerprints,
+        scores: verdict.scores,
       });
       return json({
         status: "flagged",

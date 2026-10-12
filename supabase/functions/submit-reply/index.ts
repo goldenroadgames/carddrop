@@ -119,7 +119,7 @@ Deno.serve(async (req) => {
       reply_image_url: imageUrl,
     });
     if (insertError) {
-      console.error("reply insert error:", insertError);
+      console.error("reply insert error:", insertError.code, insertError.message);
       if (uploadedPath) await supabase.storage.from("reply-photos").remove([uploadedPath]);
       return json({ error: "try_later" }, 500);
     }

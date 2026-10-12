@@ -28,6 +28,7 @@ export async function recordContentBlock(
     text: boolean;
     categories: string[];
     fingerprints: string[];
+    scores: Record<string, number>;
   },
 ): Promise<BlockOutcome> {
   const none: BlockOutcome = { suspended: false, warning: "none" };
@@ -63,9 +64,10 @@ export async function recordContentBlock(
       categories: input.categories,
       counted,
       fingerprints: input.fingerprints,
+      scores: input.scores,
     });
     if (insertError) {
-      console.error("content_blocks insert error:", insertError);
+      console.error("content_blocks insert error:", insertError.code, insertError.message);
       return none;
     }
     if (!countable) return none;

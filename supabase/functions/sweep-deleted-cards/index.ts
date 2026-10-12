@@ -1,6 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { purgeCard } from "../_shared/purgeCard.ts";
 import { deleteCard } from "../_shared/deleteCard.ts";
+import { deleteAccountData } from "../_shared/deleteAccount.ts";
 
 // Scheduled job: finishes deletes that failed partway (deleted_at set,
 // purged_at null) and runs the 12-month retention scrubs. Called by Supabase
@@ -84,12 +85,69 @@ Deno.serve(async (req) => {
       else reportedDeleted++;
     }
 
-    return json({ purged, failed, reportedDeleted, retention });
+    // Final suspensions: delete the account's data final_suspension_delete_days
+    // (default 30) after the suspension began, unless the ban is on legal hold.
+    const finalSuspensions = await sweepFinalSuspensions(supabase);
+
+    return json({ purged, failed, reportedDeleted, retention, finalSuspensions });
   } catch (err) {
     console.error("sweep-deleted-cards error:", err);
     return json({ error: "Internal server error" }, 500);
   }
 });
+
+// "Final" = the account has already been reinstated appeal_max_reinstatements
+// times (by account, or by verified email) and is suspended again. Only those
+// are deleted, never a suspension that can still be appealed. The ban rows are
+// kept (that is what keeps the person out); purged_at stops a repeat.
+// deno-lint-ignore no-explicit-any
+async function sweepFinalSuspensions(supabase: any): Promise<{ deleted: number; failed: number }> {
+  const { data: cfgRows } = await supabase
+    .from("zz_config")
+    .select("key, value")
+    .in("key", ["final_suspension_delete_days", "appeal_max_reinstatements"]);
+  const cfg: Record<string, number> = {};
+  for (const r of cfgRows ?? []) cfg[r.key] = parseInt(r.value, 10);
+  const days = cfg["final_suspension_delete_days"] > 0 ? cfg["final_suspension_delete_days"] : 30;
+  const maxReinstatements = cfg["appeal_max_reinstatements"] >= 0 ? cfg["appeal_max_reinstatements"] : 2;
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+
+  const { data: bans } = await supabase
+    .from("account_bans")
+    .select("user_id, email")
+    .is("reinstated_at", null)
+    .eq("legal_hold", false)
+    .is("purged_at", null)
+    .not("user_id", "is", null)
+    .lt("created_at", cutoff)
+    .limit(50);
+
+  let deleted = 0;
+  let failed = 0;
+  for (const ban of bans ?? []) {
+    const emailOk = ban.email && !/[,()]/.test(ban.email);
+    const { count } = await supabase
+      .from("account_bans")
+      .select("id", { count: "exact", head: true })
+      .not("reinstated_at", "is", null)
+      .or(`user_id.eq.${ban.user_id}${emailOk ? `,email.eq.${ban.email}` : ""}`);
+    if ((count ?? 0) < maxReinstatements) continue; // can still appeal: not final
+
+    const result = await deleteAccountData(supabase, ban.user_id);
+    if (!result.ok) {
+      console.error("final-suspension delete failed:", ban.user_id, result.step, result.message);
+      failed++;
+      continue;
+    }
+    await supabase
+      .from("account_bans")
+      .update({ purged_at: new Date().toISOString() })
+      .eq("user_id", ban.user_id)
+      .is("reinstated_at", null);
+    deleted++;
+  }
+  return { deleted, failed };
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

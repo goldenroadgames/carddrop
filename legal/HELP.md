@@ -26,7 +26,7 @@ In the app, open your profile and choose **Delete Account**. This removes your c
 
 ### My account was suspended.
 
-Accounts are suspended after repeated reports from recipients. If you think it was a mistake, email us.
+Accounts are suspended after repeated reports from recipients, or after repeated attempts to add content that our automated checks block, such as photos or harassing text. If you think it was a mistake, tap **Appeal This Decision** on the Account Suspended screen and tell us what happened. We review each appeal and show our answer on that screen.
 
 ## If you received a card
 

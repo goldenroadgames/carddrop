@@ -164,6 +164,7 @@ Deno.serve(async (req) => {
           text: verdict.text,
           categories: verdict.categories,
           fingerprints: verdict.fingerprints,
+        scores: verdict.scores,
         });
         if (outcome.suspended) return json({ error: "suspended" }, 403);
         return json({ error: "content_flagged", categories: verdict.categories, warning: outcome.warning }, 422);
@@ -221,7 +222,7 @@ Deno.serve(async (req) => {
       });
 
     if (insertError) {
-      console.error("Insert error:", insertError);
+      console.error("Insert error:", insertError.code, insertError.message);
       return json({ error: "Failed to insert card", detail: insertError.message }, 500);
     }
 

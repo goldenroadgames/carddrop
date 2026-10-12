@@ -261,7 +261,7 @@ Deno.serve(async (req) => {
         { onConflict: "id", ignoreDuplicates: true }
       );
     if (cardUpsertError) {
-      console.error("card upsert error:", cardUpsertError);
+      console.error("card upsert error:", cardUpsertError.code, cardUpsertError.message);
       return json({ error: "card_setup_failed", detail: cardUpsertError.message }, 500);
     }
 
@@ -300,7 +300,7 @@ Deno.serve(async (req) => {
       .single();
 
     if (insertError || !order) {
-      console.error("order insert error:", insertError);
+      console.error("order insert error:", insertError.code, insertError.message);
       return json({ error: "order_creation_failed", detail: insertError?.message }, 500);
     }
 

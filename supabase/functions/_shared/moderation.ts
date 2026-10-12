@@ -16,7 +16,9 @@ export type ModerationVerdict =
   // fingerprints = one-way hash of EACH flagged text/photo, so the same flagged
   // item tried again can be counted once even if other items on the card change
   // (contentBlocks.ts).
-  | { status: "flagged"; categories: string[]; photo: boolean; text: boolean; fingerprints: string[] }
+  // scores = highest OpenAI score (0-1) per flagged category label, kept with
+  // the block record so a borderline flag can be told from a clear one.
+  | { status: "flagged"; categories: string[]; photo: boolean; text: boolean; fingerprints: string[]; scores: Record<string, number> }
   | { status: "error" };
 
 // Human-readable names shown to the user (same labels the app used).
@@ -91,6 +93,7 @@ export async function moderateContent(
   if (results.some((r) => r.items === null)) return { status: "error" };
 
   const flagged = new Set<string>();
+  const scores: Record<string, number> = {};
   const flaggedTexts = new Set<string>();
   const flaggedImages: Uint8Array[] = [];
   let photoFlagged = false;
@@ -105,7 +108,9 @@ export async function moderateContent(
       let itemFlagged = false;
       for (const [category, on] of Object.entries(item.categories ?? {})) {
         if (on && (item.category_scores?.[category] ?? 1) >= (thresholds[category] ?? 0)) {
-          flagged.add(LABELS[category] ?? category);
+          const label = LABELS[category] ?? category;
+          flagged.add(label);
+          scores[label] = Math.max(scores[label] ?? 0, Math.round((item.category_scores?.[category] ?? 0) * 1000) / 1000);
           itemFlagged = true;
         }
       }
@@ -135,6 +140,7 @@ export async function moderateContent(
     photo: photoFlagged,
     text: textFlagged,
     fingerprints: Array.from(new Set(fingerprints)),
+    scores,
   };
 }
 
