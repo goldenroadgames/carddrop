@@ -1,5 +1,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { checkCardAcceptsReplies } from "../_shared/replyGate.ts";
+import { moderateContent } from "../_shared/moderation.ts";
 
 // Called from the public card reply forms (anon key, no login).
 // multipart/form-data: cardID, text (optional), photo (optional JPEG, already
@@ -90,9 +91,12 @@ Deno.serve(async (req) => {
     const card = gate.card;
 
     // ---------------- moderation (fail closed) ----------------
-    const verdict = await moderate(supabase, text, photoBytes);
-    if (verdict === "error") return json({ error: "try_later" }, 503);
-    if (verdict === "flagged") return json({ error: "rejected" }, 422);
+    const verdict = await moderateContent(supabase, {
+      texts: text ? [text] : [],
+      images: photoBytes ? [photoBytes] : [],
+    });
+    if (verdict.status === "error") return json({ error: "try_later" }, 503);
+    if (verdict.status === "flagged") return json({ error: "rejected" }, 422);
 
     // ---------------- store photo, insert reply ----------------
     let imageUrl: string | null = null;
@@ -158,91 +162,6 @@ async function attemptsPerHour(supabase: any): Promise<number> {
     .maybeSingle();
   const n = parseInt(data?.value ?? "", 10);
   return n > 0 ? n : DEFAULT_ATTEMPTS_PER_HOUR;
-}
-
-type ModerationItem = {
-  categories: Record<string, boolean>;
-  category_scores: Record<string, number>;
-};
-
-// Same rule as the iOS ModerationService: a category blocks only when OpenAI
-// flags it AND its score reaches our zz_config moderation_threshold_<category>
-// (no threshold row = OpenAI's own flag alone blocks).
-// deno-lint-ignore no-explicit-any
-async function moderate(supabase: any, text: string, photo: Uint8Array | null): Promise<"clean" | "flagged" | "error"> {
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!apiKey) {
-    console.error("OPENAI_API_KEY is not set");
-    return "error";
-  }
-
-  const { data: rows } = await supabase
-    .from("zz_config")
-    .select("key, value")
-    .like("key", "moderation_threshold_%");
-  const thresholds: Record<string, number> = {};
-  for (const r of rows ?? []) {
-    const score = Number(r.value);
-    if (!Number.isNaN(score)) thresholds[r.key.replace("moderation_threshold_", "")] = score;
-  }
-
-  const bodies: unknown[] = [];
-  if (text) bodies.push({ model: "omni-moderation-latest", input: [text] });
-  if (photo) {
-    bodies.push({
-      model: "omni-moderation-latest",
-      input: [{ type: "image_url", image_url: { url: `data:image/jpeg;base64,${toBase64(photo)}` } }],
-    });
-  }
-
-  const results = await Promise.all(bodies.map((b) => callModeration(apiKey, b)));
-  if (results.some((r) => r === null)) return "error";
-
-  for (const items of results as ModerationItem[][]) {
-    for (const item of items) {
-      for (const [category, on] of Object.entries(item.categories ?? {})) {
-        if (on && (item.category_scores?.[category] ?? 1) >= (thresholds[category] ?? 0)) {
-          return "flagged";
-        }
-      }
-    }
-  }
-  return "clean";
-}
-
-async function callModeration(apiKey: string, body: unknown): Promise<ModerationItem[] | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch("https://api.openai.com/v1/moderations", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.status === 429 && attempt === 0) {
-        await new Promise((r) => setTimeout(r, 3000));
-        continue;
-      }
-      if (!res.ok) {
-        console.error("moderation HTTP", res.status);
-        return null;
-      }
-      const json = await res.json();
-      return Array.isArray(json.results) ? json.results : null;
-    } catch (err) {
-      console.error("moderation request failed:", err);
-      return null;
-    }
-  }
-  return null;
-}
-
-function toBase64(bytes: Uint8Array): string {
-  let s = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    s += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(s);
 }
 
 function json(body: unknown, status = 200): Response {

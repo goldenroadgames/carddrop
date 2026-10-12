@@ -18,6 +18,8 @@ enum CardUploadService {
         case suspended
         case monthlyLimitReached(tier: String)
         case lifetimeLimitReached(tier: String)
+        case contentFlagged
+        case moderationUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -33,6 +35,10 @@ enum CardUploadService {
                 return monthlyLimitMessage(tier: tier)
             case .lifetimeLimitReached(let tier):
                 return lifetimeLimitMessage(tier: tier)
+            case .contentFlagged:
+                return "This card can't be sent because it may not meet our content standards."
+            case .moderationUnavailable:
+                return "We can't check your card right now. Please try again in a moment."
             }
         }
 
@@ -133,7 +139,8 @@ enum CardUploadService {
         recipientEmail: String?,
         messagePreview: String?,
         designFeatures: String? = nil,
-        beforeImage: UIImage? = nil
+        beforeImage: UIImage? = nil,
+        extraTexts: [String] = []
     ) async throws -> CardSendResult {
 
         try await uploadDigitalCardImages(cardID: cardID, frontData: frontData, backData: backData, back6x9Data: back6x9Data, beforeImage: beforeImage)
@@ -150,7 +157,8 @@ enum CardUploadService {
             recipientPhone: recipientPhone,
             recipientEmail: recipientEmail,
             messagePreview: messagePreview,
-            designFeatures: designFeatures
+            designFeatures: designFeatures,
+            extraTexts: extraTexts
         )
     }
 
@@ -386,7 +394,8 @@ enum CardUploadService {
         recipientPhone: String?,
         recipientEmail: String?,
         messagePreview: String?,
-        designFeatures: String? = nil
+        designFeatures: String? = nil,
+        extraTexts: [String] = []
     ) async throws -> CardSendResult {
 
         struct RequestBody: Encodable {
@@ -402,6 +411,10 @@ enum CardUploadService {
             let frontInkMessage: String?
             let backInkMessage: String?
             let designFeatures: String?
+            // Every other typed text on the card (full message, captions,
+            // greetings banner, border text...), checked server-side as real
+            // text — see PostcardDraft.userTypedTexts.
+            let extraTexts: [String]
         }
 
         struct ResponseBody: Decodable {
@@ -424,7 +437,8 @@ enum CardUploadService {
             isPortrait: isPortrait,
             frontInkMessage: frontInkMessage,
             backInkMessage: backInkMessage,
-            designFeatures: designFeatures
+            designFeatures: designFeatures,
+            extraTexts: extraTexts
         )
 
         do {
@@ -467,6 +481,8 @@ enum CardUploadService {
         case "suspended":              return .suspended
         case "monthly_limit_reached":  return .monthlyLimitReached(tier: tier)
         case "lifetime_limit_reached": return .lifetimeLimitReached(tier: tier)
+        case "content_flagged":        return .contentFlagged
+        case "moderation_unavailable": return .moderationUnavailable
         default:                       return .edgeFunctionFailed(code)
         }
     }

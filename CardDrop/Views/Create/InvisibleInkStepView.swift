@@ -8,6 +8,7 @@ struct InvisibleInkStepView: View {
     @State private var isModerating = false
     @State private var showBlockAlert = false
     @State private var flaggedCategories: [String] = []
+    @State private var showUnavailableAlert = false
     @FocusState private var textFocused: Bool
 
     var body: some View {
@@ -111,6 +112,8 @@ struct InvisibleInkStepView: View {
                     case .flagged(let categories):
                         flaggedCategories = categories
                         showBlockAlert = true
+                    case .unavailable:
+                        showUnavailableAlert = true
                     }
                 }
             } label: {
@@ -138,6 +141,11 @@ struct InvisibleInkStepView: View {
             Button("Edit Message", role: .cancel) { }
         } message: {
             Text("Your hidden message was flagged for: \(flaggedCategories.joined(separator: ", ")). Please revise before continuing.")
+        }
+        .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("We can't check your content right now. Please try again in a moment.")
         }
     }
 

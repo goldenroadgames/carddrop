@@ -49,13 +49,15 @@ We reserve the right to review, remove, or refuse to process any content submitt
 
 **Reports from recipients.** Anyone who receives a card can report it. If a recipient reports a card you sent, you will be warned and you will no longer be able to mail to that recipient's address; if you are reported repeatedly, we will suspend your account and the devices you use, without further notice. Digital cards are sent from your own device through your own messaging and email apps, not by us, and you are solely responsible for the cards you send and the recipients you choose. A card that is reported is hidden and locked: you will not be able to view it in the app, delete, resend or copy it, and we keep it for 12 months before deleting it, even if you delete your account.
 
+**Replies.** Anyone who opens a card link can reply to it, so replies come from people we don't know and don't control. Replies must follow the rules in this section. We check replies automatically and may refuse any reply, and we limit how many can be sent from one connection. These checks are not perfect, and we do not guarantee that harmful replies will never reach you. You can turn replies off for any card or for your whole account, and you can delete individual replies, in the app.
+
 ## 7. Physical Fulfillment and Delivery
 
 Physical postcards are printed and mailed by our third-party Print Partner. We are not responsible for postal delivery delays, non-delivery, or damage that occurs once an order enters the mail stream. Estimated delivery windows shown in the app are estimates only and are not guaranteed. You are responsible for entering accurate recipient addresses; we are not liable for cards misdelivered due to incorrect address information you provided. If a recipient has asked not to receive mail from you, or from CardDrop, we will decline to print and mail to that address, and you will not be charged.
 
 ## 8. Third-Party Services
 
-The Service relies on third-party providers, including but not limited to Apple (App Store, Sign in with Apple, push notifications), Stripe (payment processing), Supabase (data storage and authentication), and our Print Partner (print and mail fulfillment). Your use of the Service is also subject to those providers' own terms where applicable.
+The Service relies on third-party providers, including but not limited to Apple (App Store, Sign in with Apple, push notifications), Stripe (payment processing), Supabase (data storage and authentication), OpenAI (automated content-safety checks), and our Print Partner (print and mail fulfillment). Your use of the Service is also subject to those providers' own terms where applicable.
 
 ## 9. Intellectual Property
 

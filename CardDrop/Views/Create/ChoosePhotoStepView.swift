@@ -53,6 +53,7 @@ struct ChoosePhotoStepView: View {
     @State private var showLowResAlert = false
     @State private var flaggedCategories: [String] = []
     @State private var showModerationAlert = false
+    @State private var showUnavailableAlert = false
     @State private var cachedFilteredImage: UIImage? = nil
     @State private var filterThumbnails: [PostcardFilter: UIImage] = [:]
     @State private var filterThumbnailsSourceImage: UIImage? = nil
@@ -245,6 +246,11 @@ struct ChoosePhotoStepView: View {
         } message: {
             Text("That photo was flagged for: \(flaggedCategories.joined(separator: ", ")). Please choose a different photo.")
         }
+        .alert("Can't Check Photo", isPresented: $showUnavailableAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("We can't check your photo right now. Please try again in a moment.")
+        }
     }
 
     // Shared entry point for a picked image, whichever source it came from
@@ -260,6 +266,9 @@ struct ChoosePhotoStepView: View {
             case .flagged(let categories):
                 flaggedCategories = categories
                 showModerationAlert = true
+                return
+            case .unavailable:
+                showUnavailableAlert = true
                 return
             case .clean:
                 break

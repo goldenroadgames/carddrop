@@ -15,6 +15,7 @@ struct MessageStepView: View {
     @State private var isModerating = false
     @State private var flaggedCategories: [String] = []
     @State private var showHardBlockAlert = false
+    @State private var showUnavailableAlert = false
 
     @State private var greetings: [CardbackGreeting] = []
     @State private var phrases: [CardbackPhrase] = []
@@ -247,6 +248,8 @@ struct MessageStepView: View {
                         case .flagged(let categories):
                             flaggedCategories = categories
                             showHardBlockAlert = true
+                        case .unavailable:
+                            showUnavailableAlert = true
                         }
                     }
                 } label: {
@@ -275,15 +278,21 @@ struct MessageStepView: View {
         .alert("Content Not Allowed", isPresented: $showHardBlockAlert) {
             Button("Edit Message", role: .cancel) { }
         } message: {
-            Text("Your message was flagged for: \(flaggedCategories.joined(separator: ", ")). Please revise before continuing.")
+            Text("Your photo or text was flagged for: \(flaggedCategories.joined(separator: ", ")). Please check your photo, message, captions, greetings and names, then try again.")
+        }
+        .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("We can't check your content right now. Please try again in a moment.")
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
+    // All user-typed text on the card, not just this step's fields: passing
+    // here sets moderationState to .passed, so it has to cover everything
+    // (see PostcardDraft.userTypedTexts).
     private var messageTexts: [String] {
-        var texts = [draft.message]
-        texts += draft.qrOverlays.map { $0.content }
-        return texts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        draft.userTypedTexts
     }
 
     // MARK: - Greeting carousel

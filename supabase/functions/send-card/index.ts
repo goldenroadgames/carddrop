@@ -1,5 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isBanned } from "../_shared/bans.ts";
+import { moderateContent } from "../_shared/moderation.ts";
+import { removeFolder } from "../_shared/purgeCard.ts";
 
 Deno.serve(async (req) => {
   try {
@@ -21,7 +23,8 @@ Deno.serve(async (req) => {
     const { cardID, deviceUUID, senderNickname, recipientNickname,
             recipientFirstName, recipientLastName, recipientName,
             recipientPhone, recipientEmail, messagePreview,
-            isPortrait, frontInkMessage, backInkMessage, designFeatures } = await req.json();
+            isPortrait, frontInkMessage, backInkMessage, designFeatures,
+            extraTexts } = await req.json();
 
     if (!cardID)    return json({ error: "cardID required" }, 400);
     if (!deviceUUID) return json({ error: "deviceUUID required" }, 400);
@@ -118,6 +121,40 @@ Deno.serve(async (req) => {
       }
       if (lifetimeLimit !== -1 && deviceLifetime >= lifetimeLimit) {
         return json({ error: "lifetime_limit_reached", tier }, 429);
+      }
+    }
+
+    // ----------------------------------------------------------------
+    // Content-safety gate: everything this function can see is checked
+    // server-side, so a modified app can't skip the app's own checks. That is
+    // the nicknames, message preview, ink messages, and the already-uploaded
+    // front and back images (images over 4 MB are not checked; the web-size
+    // copies are far smaller). Fails closed. A rejected card's uploaded
+    // images are public, so they are removed.
+    // ----------------------------------------------------------------
+    {
+      const cardPath = cardID.toLowerCase();
+      const images: Uint8Array[] = [];
+      for (const name of [`${cardPath}.jpg`, `${cardPath}_back.jpg`]) {
+        const { data: blob } = await supabase.storage.from("card-images").download(`${user.id}/${name}`);
+        if (blob && blob.size <= 4 * 1024 * 1024) images.push(new Uint8Array(await blob.arrayBuffer()));
+      }
+      const verdict = await moderateContent(supabase, {
+        // The fields saved on the card, plus the app's list of every other
+        // typed text (full message, captions, greetings banner, border text).
+        // Capped so a request can't make the check unreasonably large.
+        texts: [
+          senderNickname, recipientNickname, messagePreview, frontInkMessage, backInkMessage,
+          ...(Array.isArray(extraTexts) ? extraTexts.slice(0, 50) : []),
+        ]
+          .filter((t): t is string => typeof t === "string")
+          .map((t) => t.slice(0, 2000)),
+        images,
+      });
+      if (verdict.status === "error") return json({ error: "moderation_unavailable" }, 503);
+      if (verdict.status === "flagged") {
+        await removeFolder(supabase, "card-images", user.id, cardPath);
+        return json({ error: "content_flagged", categories: verdict.categories }, 422);
       }
     }
 

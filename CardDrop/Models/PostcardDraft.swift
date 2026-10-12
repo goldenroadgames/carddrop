@@ -115,13 +115,23 @@ class PostcardDraft: ObservableObject {
     // visible/relevant with a Tilt Greetings badge, which is why its toggle
     // lives in that edit panel rather than a general Style It control.
     @Published var photoMirrorEnabled: Bool = true
-    @Published var borderText: String = ""
+    @Published var borderText: String = "" {
+        didSet { moderationState = .untested }
+    }
     @Published var borderFontName: String = "Georgia"
     @Published var borderTextColor: Color = .black
     @Published var decorativePresetID: String = ""
-    @Published var textOverlays: [TextOverlay] = []
-    @Published var burstOverlays: [BurstCaptionOverlay] = []
-    @Published var greetingsOverlays: [GreetingsOverlay] = []
+    // Every typed-text field below resets moderationState when it changes, so
+    // the content-safety check re-runs before the card can move on.
+    @Published var textOverlays: [TextOverlay] = [] {
+        didSet { moderationState = .untested }
+    }
+    @Published var burstOverlays: [BurstCaptionOverlay] = [] {
+        didSet { moderationState = .untested }
+    }
+    @Published var greetingsOverlays: [GreetingsOverlay] = [] {
+        didSet { moderationState = .untested }
+    }
     @Published var qrOverlays: [QROverlay] = [] {
         didSet { moderationState = .untested }
     }
@@ -129,6 +139,20 @@ class PostcardDraft: ObservableObject {
     // Transient — not persisted. Not @Published (no view observes it directly).
     var moderationState: ModerationState = .untested
     var imageModeratedState: ModerationState = .untested
+
+    /// Every piece of text the user typed that ends up on the card: message,
+    /// invisible-ink and QR text, Add Text / burst captions, the Greetings
+    /// banner words, the To/From nicknames and the border text. The one list
+    /// the content-safety check runs over (CreateFlowView, MessageStepView).
+    var userTypedTexts: [String] {
+        var texts: [String] = [message, senderNickname, recipientNickname, borderText]
+        if includeBackMessageQR { texts.append(backMessageQRContent) }
+        texts += qrOverlays.map { $0.content }
+        texts += textOverlays.map { $0.text }
+        texts += burstOverlays.map { $0.text }
+        texts += greetingsOverlays.flatMap { [$0.word, $0.scriptText] }
+        return texts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
 
     // Transient — not persisted. Write Card's To/From nicknames are
     // required to move forward (but not backward); these flip true on a
@@ -140,8 +164,12 @@ class PostcardDraft: ObservableObject {
     @Published var showSenderNicknameError = false
 
     // Casual nicknames, entered in the first flow step
-    @Published var senderNickname: String = ""
-    @Published var recipientNickname: String = ""
+    @Published var senderNickname: String = "" {
+        didSet { moderationState = .untested }
+    }
+    @Published var recipientNickname: String = "" {
+        didSet { moderationState = .untested }
+    }
 
     // Back side
     @Published var message: String = "" {

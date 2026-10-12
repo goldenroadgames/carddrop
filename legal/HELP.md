@@ -36,7 +36,7 @@ It's a digital postcard. Open the link and the card opens for you to flip, read 
 
 ### Can I reply or react?
 
-Yes. Use the reply and reaction buttons under the card. Your reply goes back to the person who sent it.
+Yes, unless the sender does not allow replies. Use the reply and reaction buttons under the card. Your reply goes back to the person who sent it.
 
 ### I got a physical postcard. How do I stop getting them?
 

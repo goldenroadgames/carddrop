@@ -1024,7 +1024,8 @@ struct SendOptionsView: View {
                 recipientEmail: draft.recipientEmail.isEmpty ? nil : draft.recipientEmail,
                 messagePreview: String(draft.message.prefix(100)),
                 designFeatures: draft.designFeatureSummary(),
-                beforeImage: draft.image
+                beforeImage: draft.image,
+                extraTexts: draft.userTypedTexts
             )
             cardSendResult = result
             hasSent = true

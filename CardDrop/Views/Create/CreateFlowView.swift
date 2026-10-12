@@ -29,6 +29,7 @@ struct CreateFlowView: View {
     @State private var isModerating = false
     @State private var moderationFlagged: [String] = []
     @State private var showHardBlockAlert = false
+    @State private var showUnavailableAlert = false
     // Mirrored from SendOptionsView's isSubmittingToLOB — blocks the
     // toolbar Close button while a postcard order is mid-submit, same as
     // the Finish button on the Send Options screen itself.
@@ -153,10 +154,16 @@ struct CreateFlowView: View {
 
             .onReceive(draft.objectWillChange) { _ in isDirty = true }
             .alert("Content Not Allowed", isPresented: $showHardBlockAlert) {
-                Button("Go to Message Step") { currentStep = 3 }
+                Button("Go to Style It") { currentStep = 1 }
+                Button("Go to Write Card") { currentStep = 2 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Your message was flagged for: \(moderationFlagged.joined(separator: ", ")). Please revise before continuing.")
+                Text("Your photo or text was flagged for: \(moderationFlagged.joined(separator: ", ")). Please check your photo, message, captions, greetings and names, then try again.")
+            }
+            .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("We can't check your content right now. Please try again in a moment.")
             }
             // Brief "Draft saved" banner
             .overlay(alignment: .top) {
@@ -269,11 +276,10 @@ struct CreateFlowView: View {
 
     // MARK: - Moderation
 
+    // All user-typed text on the card (message, ink/QR text, captions,
+    // greetings banner, nicknames, border text) — see PostcardDraft.userTypedTexts.
     private var messageTextsFromDraft: [String] {
-        var texts = [draft.message]
-        if draft.includeBackMessageQR { texts.append(draft.backMessageQRContent) }
-        texts += draft.qrOverlays.map { $0.content }
-        return texts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        draft.userTypedTexts
     }
 
     // MARK: - Step title
@@ -340,6 +346,8 @@ struct CreateFlowView: View {
                             case .flagged(let categories):
                                 moderationFlagged = categories
                                 showHardBlockAlert = true
+                            case .unavailable:
+                                showUnavailableAlert = true
                             }
                         }
                     } else {

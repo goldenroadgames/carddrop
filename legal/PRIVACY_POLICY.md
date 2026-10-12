@@ -16,6 +16,8 @@ This Privacy Policy explains how Golden Road Games LLC ("CardDrop," "we," "us," 
 
 **Safety and abuse-prevention records.** To prevent abuse we keep: an identifier for your device (stored in your phone's secure storage, where it can survive deleting and reinstalling the app); a record of each card you send (which card, when, and how — text, email, link, or mail; for digital cards we do not know who the recipient is, because they are sent from your own phone's messaging and email apps); how many cards you have sent; and any report made about a card you sent, including the text of the report. People who report a card are not asked for their name or contact details.
 
+**Replies and reactions.** People who open one of your card links can reply with text, a photo, or an emoji reaction. We collect what they send and the time. We do not ask for their name or contact details. Photos are shrunk on their device before upload, which removes location data. We do not keep who sent a reply.
+
 ## 2. How We Use Information
 
 We use the information we collect to:
@@ -38,6 +40,7 @@ We share information only as necessary to operate the Service:
 - **Print Partner** — for physical postcard orders, we share the card design and the recipient's mailing address (and your return address, if applicable) with our third-party print-and-mail fulfillment provider solely to print and mail the order. Per our partner's data retention practices, mailpiece data is automatically deleted from their systems after a limited period.
 - **Payment processors** — Stripe and Apple process payment information to complete purchases.
 - **Infrastructure providers** — we use third-party cloud database, authentication, file storage, email delivery, and hosting providers to run the Service.
+- **Content-safety check** — text and photos are sent to OpenAI's moderation service to check for harmful content, under OpenAI's own privacy terms. This covers text and photos you enter or upload in the app when you create a card, and replies sent to your cards from the web. A reply that fails the check is not stored.
 - **Legal reasons** — we may disclose information if required by law, subpoena, or to protect the rights, safety, or property of CardDrop, our users, or others.
 
 We do not share your data with third parties for their own marketing purposes.
@@ -47,6 +50,8 @@ We do not share your data with third parties for their own marketing purposes.
 When you share a digital card via text message, email, or a direct link, the Service generates a unique web page (a "card link") where the recipient can view the card. **Anyone who has or obtains that link can view the card**, including its photo, message, and design, without needing to log in or verify their identity. Card links are not indexed by search engines, but they are not private or access-restricted beyond the link itself — treat a card link like you would any other shared link, and only send cards to recipients you're comfortable having potentially forward or share that link further.
 
 **Reporting a card.** Every card page has a "Report abuse" link. Anyone can make a report without an account and without giving their name or contact details. We record the report against the card and its sender. If the card was mailed, we use the report to stop that sender from mailing the same address again, and, if the person reporting chooses, to stop all CardDrop senders from mailing that address. If a sender is reported repeatedly, we suspend their account and device. We cannot stop someone from contacting a recipient directly outside CardDrop. A card that has been reported is hidden: its link stops working, it disappears from the sender's lists, and the sender can no longer delete, resend or copy it. We keep that card, including its images and message, for 12 months as evidence, then delete it. This is true even if the sender deletes their account.
+
+**Replies and reactions.** Anyone who has a card link can send a reply (text and one photo) or emoji reactions to the sender. Reply photos are stored at web addresses that are not listed anywhere, but anyone who has an address can open it. Replies and photos are shown to you in the app. To limit spam, we check each reply automatically (see Section 3) and limit how many a single internet connection can send per hour. For that limit we keep a scrambled (hashed) form of the sender's IP address and the time, with no reply content and no card, and we delete these records periodically. You can turn replies and reactions off for a single card or for all your cards, and you can delete an individual reply. When you turn them off you choose whether to hide the ones already received (they come back if you turn replies on again) or delete them for good.
 
 ## 5. Marketing Use of Card Designs
 
@@ -66,6 +71,7 @@ Some records are kept for a set period, even if you delete a card or your accoun
 - **Mailed postcard orders.** The recipient's name and mailing address on a physical order are kept for 12 months after the order, then erased. Your own return address on the order is erased when you delete your account, or after 12 months, whichever comes first. We keep the payment and order record itself (amount, date, status, and the payment and print-partner reference numbers, without names or addresses) for 7 years for accounting and dispute purposes.
 - **Reports.** The text of a report about a card is kept for 12 months, together with the reported card itself and the email address of the account that sent it, even if that account is deleted in the meantime. A record that a sender, or all senders, may not mail a particular address is kept permanently; it is stored as a one-way scrambled (hashed) form, not as the readable address.
 - **Suspensions.** If an account or device is suspended, we keep the record of the suspension, including the account's verified email address if it has one, even after the account is deleted, so that a suspended person cannot simply create a new account.
+- **Replies and reactions.** Kept until you delete a reply, delete the card, or delete your account, or choose "Delete existing replies" when turning replies off. Replies you have only hidden are kept until you delete them by one of those routes. The scrambled address records used to limit reply spam are deleted periodically.
 
 ## 7. Your Choices and Rights
 
