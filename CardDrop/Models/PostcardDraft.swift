@@ -77,6 +77,25 @@ class PostcardDraft: ObservableObject {
     /// Never changes — sending is immutable, edits require a duplicate.
     var cardID: UUID = UUID()
 
+    // Minimum pixel dimensions for acceptable print quality on a 6x9 postcard
+    // at ~200 DPI (300 DPI ideal = 1800×2700). Below this we warn, but still
+    // allow proceeding — first when the photo is picked (ChoosePhotoStepView),
+    // again when the user taps Mail Real Postcard (SendOptionsView).
+    static let minPrintPixelsLong: CGFloat = 1800
+    static let minPrintPixelsShort: CGFloat = 1200
+
+    static func isImageLowResolutionForPrint(_ image: UIImage) -> Bool {
+        let width  = image.size.width  * image.scale
+        let height = image.size.height * image.scale
+        return max(width, height) < minPrintPixelsLong || min(width, height) < minPrintPixelsShort
+    }
+
+    /// True when the card's photo is below the recommended print size.
+    var isLowResolutionForPrint: Bool {
+        guard let image else { return false }
+        return Self.isImageLowResolutionForPrint(image)
+    }
+
     @Published var image: UIImage? {
         // A new/replaced photo invalidates any existing subject cutout —
         // it was masked from the OLD photo's pixels, so it no longer
@@ -142,10 +161,12 @@ class PostcardDraft: ObservableObject {
 
     /// Every piece of text the user typed that ends up on the card: message,
     /// invisible-ink and QR text, Add Text / burst captions, the Greetings
-    /// banner words, the To/From nicknames and the border text. The one list
+    /// banner words, the To/From nicknames, the border text and the canned
+    /// greeting/phrase text on the card back. The one list
     /// the content-safety check runs over (CreateFlowView, MessageStepView).
     var userTypedTexts: [String] {
-        var texts: [String] = [message, senderNickname, recipientNickname, borderText]
+        var texts: [String] = [message, senderNickname, recipientNickname, borderText,
+                               greetingSalutation, greetingClosing, phraseText]
         if includeBackMessageQR { texts.append(backMessageQRContent) }
         texts += qrOverlays.map { $0.content }
         texts += textOverlays.map { $0.text }
@@ -183,11 +204,20 @@ class PostcardDraft: ObservableObject {
     // filled) display text — PostcardBackCanvas reads those directly rather
     // than re-fetching zz_cardback_greetings/zz_cardback_phrases itself.
     @Published var greetingId: UUID?
-    @Published var greetingSalutation: String = ""
-    @Published var greetingClosing: String = ""
+    // The canned greeting/phrase text printed on the card back is checked
+    // like any other card text (see userTypedTexts), so these also reset
+    // moderationState when they change.
+    @Published var greetingSalutation: String = "" {
+        didSet { moderationState = .untested }
+    }
+    @Published var greetingClosing: String = "" {
+        didSet { moderationState = .untested }
+    }
     @Published var phraseCategory: String = "All"
     @Published var phraseId: UUID?
-    @Published var phraseText: String = ""
+    @Published var phraseText: String = "" {
+        didSet { moderationState = .untested }
+    }
     @Published var senderFirstName: String = ""
     @Published var senderLastName: String = ""
     @Published var senderStreet: String = ""

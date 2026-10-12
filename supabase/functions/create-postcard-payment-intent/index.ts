@@ -1,6 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isBanned } from "../_shared/bans.ts";
 import { addressHash } from "../_shared/addressKey.ts";
+import { moderateContent } from "../_shared/moderation.ts";
 
 // Creates a physical_orders row (status: pending_payment) for a card being
 // mailed via LOB, then creates a matching Stripe PaymentIntent for the
@@ -69,6 +70,26 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (recipientError || !recipient) return json({ error: "recipient_address_not_found" }, 404);
     if (recipient.user_id !== user.id) return json({ error: "unauthorized" }, 403);
+
+    // Content-safety check on the names and addresses that will be printed,
+    // before anything is charged. Fails closed. `detail` is shown to the user.
+    const addressVerdict = await moderateContent(supabase, {
+      texts: [sender, recipient].flatMap((a) => [
+        a.first_name, a.last_name, a.street, a.city, a.state, a.country,
+      ]).filter((t): t is string => typeof t === "string"),
+    });
+    if (addressVerdict.status === "error") {
+      return json({
+        error: "moderation_unavailable",
+        detail: "We can't check your addresses right now. Please try again in a moment.",
+      }, 503);
+    }
+    if (addressVerdict.status === "flagged") {
+      return json({
+        error: "content_flagged",
+        detail: "A name or address can't be used because it may not meet our content standards.",
+      }, 422);
+    }
 
     // Recipient has asked not to receive mail from this sender (or from
     // anyone) after reporting a card. Deliberately neutral wording.

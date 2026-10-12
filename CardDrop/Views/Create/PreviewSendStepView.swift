@@ -67,6 +67,7 @@ struct SendOptionsView: View {
     @State private var showMessageRecipients = false
     @State private var pendingMessageRecipients: [RecipientContact] = []
     @State private var showMailPostcardFlow = false
+    @State private var showLowResMailAlert = false
     // Free-postcard allowance (friends & family) — display only; refreshed
     // whenever the mail flow opens/closes or an order is confirmed.
     @State private var postcardAllowance: PostcardAllowance?
@@ -356,13 +357,19 @@ struct SendOptionsView: View {
             OTPVerificationView(
                 onSuccess: {
                     showVerifyEmailForMail = false
-                    showMailPostcardFlow = true
+                    requestMailPostcard()
                 },
                 onCancel: { showVerifyEmailForMail = false }
             )
             .environmentObject(authManager)
             .environmentObject(draftManager)
             .environmentObject(addressBook)
+        }
+        .alert("Photo May Print Blurry", isPresented: $showLowResMailAlert) {
+            Button("Continue") { showMailPostcardFlow = true }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This photo is lower resolution than recommended for a postcard and may print soft. It should still look fine as a digital card, which you can send instead.")
         }
         .task(id: showMailPostcardFlow) { postcardAllowance = await PostcardOrderService.fetchAllowance() }
         .task(id: postcardOrderConfirmed) { postcardAllowance = await PostcardOrderService.fetchAllowance() }
@@ -445,7 +452,7 @@ struct SendOptionsView: View {
                                 ? "Print & mail – \(postcardAllowance?.remaining ?? 0) free left this month"
                                 : "Printed & mailed for you",
                             color: .brandBlue
-                        ) { showMailPostcardFlow = true }
+                        ) { requestMailPostcard() }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -610,6 +617,18 @@ struct SendOptionsView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: isSubmittingToLOB)
+    }
+
+    // Every path into Mail Real Postcard goes through here. A photo below the
+    // recommended print size gets a second warning (Continue / Cancel) — the
+    // first one, when the photo was picked, came before the user had chosen
+    // between a digital send (resolution doesn't matter) and mailing.
+    private func requestMailPostcard() {
+        if draft.isLowResolutionForPrint {
+            showLowResMailAlert = true
+        } else {
+            showMailPostcardFlow = true
+        }
     }
 
     private func handleFinish() {

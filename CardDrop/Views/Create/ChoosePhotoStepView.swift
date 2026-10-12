@@ -1,10 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-// Minimum pixel dimensions for acceptable print quality on a 6x9 postcard at ~200 DPI.
-// 300 DPI ideal = 1800×2700; we warn below that but still allow proceeding.
-private let minPrintPixels: CGFloat = 1800  // long side
-private let minPrintPixelsShort: CGFloat = 1200  // short side
+// The print-quality thresholds live in PostcardDraft (isImageLowResolutionForPrint),
+// shared with the warning shown again when the user taps Mail Real Postcard.
 
 private extension View {
     // .shadow()'s blur always scales with radius — there's no hard-edge
@@ -274,11 +272,7 @@ struct ChoosePhotoStepView: View {
                 break
             }
 
-            let pixelWidth  = image.size.width  * image.scale
-            let pixelHeight = image.size.height * image.scale
-            let longSide    = max(pixelWidth, pixelHeight)
-            let shortSide   = min(pixelWidth, pixelHeight)
-            if longSide < minPrintPixels || shortSide < minPrintPixelsShort {
+            if PostcardDraft.isImageLowResolutionForPrint(image) {
                 pendingLowResImage = image
                 showLowResAlert = true
                 return

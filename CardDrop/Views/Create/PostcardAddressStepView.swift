@@ -24,6 +24,13 @@ struct PostcardAddressStepView: View {
     @State private var showSenderPicker = false
     @State private var showRecipientPicker = false
 
+    // Content-safety check on the names and addresses when Next is tapped
+    // (create-postcard-payment-intent repeats it server-side before any charge).
+    @State private var isCheckingContent = false
+    @State private var flaggedCategories: [String] = []
+    @State private var showFlaggedAlert = false
+    @State private var showUnavailableAlert = false
+
     @State private var verifyingRole: MailingAddressType?
     @State private var verifyError: String?
     @State private var showVerifyError = false
@@ -55,6 +62,11 @@ struct PostcardAddressStepView: View {
         let senderOK = selectedSender.isVerified || overrideConfirmed
         let recipientOK = selectedRecipient.isVerified || overrideConfirmed
         return senderOK && recipientOK
+    }
+
+    // The typed parts of an address that get printed on the card.
+    private func contentTexts(_ a: SavedMailingAddress) -> [String] {
+        [a.firstName, a.lastName, a.street, a.city, a.state, a.country].compactMap { $0 }
     }
 
     private var allowanceApplies: Bool { (allowance?.remaining ?? 0) > 0 }
@@ -131,18 +143,39 @@ struct PostcardAddressStepView: View {
                 // Its own label reflects the chosen size + price.
                 Button {
                     if let selectedSender, let selectedRecipient, let price = selectedPriceOption {
-                        onContinue(selectedSender, selectedRecipient, price)
+                        Task {
+                            isCheckingContent = true
+                            let result = await ModerationService.check(
+                                texts: contentTexts(selectedSender) + contentTexts(selectedRecipient)
+                            )
+                            isCheckingContent = false
+                            switch result {
+                            case .clean:
+                                onContinue(selectedSender, selectedRecipient, price)
+                            case .flagged(let categories):
+                                flaggedCategories = categories
+                                showFlaggedAlert = true
+                            case .unavailable:
+                                showUnavailableAlert = true
+                            }
+                        }
                     }
                 } label: {
-                    Text(nextButtonTitle)
-                        .font(.system(size: 17, weight: .semibold))
+                    Group {
+                        if isCheckingContent {
+                            ProgressView().tint(.white)
+                        } else {
+                            Text(nextButtonTitle)
+                                .font(.system(size: 17, weight: .semibold))
+                        }
+                    }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
                         .background(Color.brandBlue)
                         .foregroundColor(.white)
                         .cornerRadius(999)
                 }
-                .disabled(!canContinue)
+                .disabled(!canContinue || isCheckingContent)
                 .opacity(canContinue ? 1 : 0.4)
                 .padding(.horizontal)
                 .padding(.bottom, 12)
@@ -168,6 +201,16 @@ struct PostcardAddressStepView: View {
                 Button("OK") {}
             } message: { message in
                 Text(message)
+            }
+            .alert("Content Not Allowed", isPresented: $showFlaggedAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("A name or address was flagged for: \(flaggedCategories.joined(separator: ", ")). Please edit the address and try again.")
+            }
+            .alert("Can't Check Addresses", isPresented: $showUnavailableAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("We can't check your addresses right now. Please try again in a moment.")
             }
         }
         .dynamicTypeSize(.medium ... .xxxLarge)
