@@ -41,6 +41,11 @@ export async function purgeCard(
   // Card images: no wildcard in the Storage API, so list the sender's folder
   // by cardID prefix and remove everything returned. Catches every variant
   // (_back, _thumb, _full, _before*, _front_forLOB_*, _back_forLOB_* ...).
+  // Also the private staging copies and the private print-scale originals.
+  for (const bucket of ["card-staging", "card-private"]) {
+    const err = await removeFolder(supabase, bucket, senderID.toLowerCase(), id);
+    if (err) return err;
+  }
   return await removeFolder(supabase, "card-images", senderID.toLowerCase(), id);
 }
 

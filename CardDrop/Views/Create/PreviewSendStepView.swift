@@ -71,6 +71,11 @@ struct SendOptionsView: View {
     // whenever the mail flow opens/closes or an order is confirmed.
     @State private var postcardAllowance: PostcardAllowance?
     @State private var showVerifyEmailForMail = false
+    // Digital sends need a verified account (no free tier). Remembers which
+    // send row was tapped so the sign-in / OTP chain can finish it.
+    private enum DigitalSend { case email, text }
+    @State private var pendingDigitalSend: DigitalSend? = nil
+    @State private var showVerifyEmailForDigital = false
     // True only when showCreateAccount was opened FROM the "Mail Real
     // Postcard" row (not the free-send-quota prompt) — lets its onSuccess
     // chain straight into OTP verification instead of just returning to
@@ -347,6 +352,24 @@ struct SendOptionsView: View {
                 performTextSend(entries: entries)
             }
         }
+        .sheet(isPresented: $showVerifyEmailForDigital) {
+            OTPVerificationView(
+                onSuccess: {
+                    showVerifyEmailForDigital = false
+                    if let kind = pendingDigitalSend {
+                        pendingDigitalSend = nil
+                        continueDigitalSend(kind)
+                    }
+                },
+                onCancel: {
+                    showVerifyEmailForDigital = false
+                    pendingDigitalSend = nil
+                }
+            )
+            .environmentObject(authManager)
+            .environmentObject(draftManager)
+            .environmentObject(addressBook)
+        }
         .sheet(isPresented: $showVerifyEmailForMail) {
             OTPVerificationView(
                 onSuccess: {
@@ -424,6 +447,7 @@ struct SendOptionsView: View {
                             subtitle: "Create Account to Mail Real Postcards",
                             color: .brandBlue
                         ) {
+                            pendingDigitalSend = nil
                             pendingMailAfterAccountCreation = true
                             showCreateAccount = true
                         }
@@ -486,9 +510,9 @@ struct SendOptionsView: View {
                         sendRow(
                             icon: "envelope",
                             title: "Email",
-                            subtitle: "Send as an interactive postcard",
+                            subtitle: digitalSendSubtitle(verified: "Send as an interactive postcard"),
                             color: .blue
-                        ) { sendEmail() }
+                        ) { requestDigitalSend(.email) }
                         .padding(.horizontal, 16)
 
                         Divider().padding(.leading, 66)
@@ -497,9 +521,9 @@ struct SendOptionsView: View {
                     sendRow(
                         icon: "message",
                         title: "Text Message",
-                        subtitle: "Send via Messages",
+                        subtitle: digitalSendSubtitle(verified: "Send via Messages"),
                         color: .green
-                    ) { sendText() }
+                    ) { requestDigitalSend(.text) }
                     .padding(.horizontal, 16)
                 }
                 .background(Color(uiColor: .secondarySystemGroupedBackground))
@@ -547,6 +571,7 @@ struct SendOptionsView: View {
                 title: Text(""),
                 message: Text(prompt.title + "\n" + prompt.message),
                 primaryButton: .default(Text("Yes")) {
+                    pendingDigitalSend = nil
                     if prompt.isAnonymous {
                         pendingMailAfterAccountCreation = false
                         showCreateAccount = true
@@ -564,6 +589,13 @@ struct SendOptionsView: View {
                 if pendingMailAfterAccountCreation {
                     pendingMailAfterAccountCreation = false
                     showVerifyEmailForMail = true
+                } else if let kind = pendingDigitalSend {
+                    if authManager.isEmailVerified {
+                        pendingDigitalSend = nil
+                        continueDigitalSend(kind)
+                    } else {
+                        showVerifyEmailForDigital = true
+                    }
                 }
             })
                 .environmentObject(authManager)
@@ -661,21 +693,51 @@ struct SendOptionsView: View {
 
     private func setLimitPrompt(for error: CardUploadService.UploadError) {
         switch error {
-        case .monthlyLimitReached:
+        case .monthlyLimitReached, .lifetimeLimitReached:
             limitPrompt = LimitPrompt(
-                title: "Monthly Limit Reached",
+                title: "Account Required",
                 message: authManager.isAnonymous
-                    ? "You've used your free sends for this month. Create a free account to get more free sends."
-                    : "You've used your 5 free sends this month. Verify your email to unlock unlimited sends - it's free.",
+                    ? "Create a free account to send cards."
+                    : "Verify your email to send cards - it's free.",
                 isAnonymous: authManager.isAnonymous
             )
-        case .lifetimeLimitReached:
-            limitPrompt = LimitPrompt(
-                title: "Send Limit Reached",
-                message: "You've used all of your free sends. Create a free account to keep sending.",
-                isAnonymous: true
-            )
         default: break
+        }
+    }
+
+    private func digitalSendSubtitle(verified: String) -> String {
+        if authManager.isAnonymous { return "Create Account to Send" }
+        if !authManager.isEmailVerified { return "Verify Your Email to Send" }
+        return verified
+    }
+
+    // Every digital send goes through here, same up-front gate as Mail Real
+    // Postcard: no account → create one, unverified → OTP, then the tapped
+    // send carries on by itself.
+    private func requestDigitalSend(_ kind: DigitalSend) {
+        guard !isSending else { return }
+        guard draft.image != nil else { showMissingPhotoAlert = true; return }
+        if authManager.isAnonymous {
+            pendingDigitalSend = kind
+            pendingMailAfterAccountCreation = false
+            showCreateAccount = true
+        } else if !authManager.isEmailVerified {
+            pendingDigitalSend = kind
+            showVerifyEmailForDigital = true
+        } else {
+            continueDigitalSend(kind)
+        }
+    }
+
+    // Short delay lets the sign-in / OTP sheet finish dismissing before the
+    // Mail / Messages composer is presented.
+    private func continueDigitalSend(_ kind: DigitalSend) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            switch kind {
+            case .email: sendEmail()
+            case .text:  sendText()
+            }
         }
     }
 

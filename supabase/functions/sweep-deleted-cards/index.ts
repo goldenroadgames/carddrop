@@ -62,12 +62,18 @@ Deno.serve(async (req) => {
       ["send_log", supabase.from("card_recipients").delete().lt("created_at", cutoff)],
       // Records of content blocked by moderation (no content, just who/kind/category/time).
       ["content_blocks", supabase.from("content_blocks").delete().lt("created_at", cutoff)],
+      // Send-rate cap log: the cap only looks back 24 hours, so keep 2 days.
+      ["send_events", supabase.from("send_events").delete()
+        .lt("created_at", new Date(Date.now() - 2 * 86400000).toISOString())],
     ];
     for (const [name, op] of steps) {
       const { error: opError } = await op;
       retention[name] = opError ? opError.message : null;
       if (opError) console.error("sweep retention error:", name, opError.message);
     }
+
+    // Staged uploads that never became a card (private card-staging bucket).
+    const staging = await sweepStaging(supabase, 2 * 86400000);
 
     // Reported cards are kept as evidence for 12 months, then deleted like
     // any other card (blanked tombstone + files purged).
@@ -98,7 +104,7 @@ Deno.serve(async (req) => {
     // "Delete data now" requests from the admin page.
     const deleteRequests = await sweepDeleteRequests(supabase);
 
-    return json({ purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions, deleteRequests });
+    return json({ staging, purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions, deleteRequests });
   } catch (err) {
     console.error("sweep-deleted-cards error:", err);
     return json({ error: "Internal server error" }, 500);
@@ -310,6 +316,33 @@ async function closeStaleAppeals(supabase: any): Promise<{ closed: number }> {
     return { closed: 0 };
   }
   return { closed: (closed ?? []).length };
+}
+
+// Removes files in card-staging older than maxAgeMs. Staged files are normally
+// moved out within seconds of a send; leftovers come from abandoned or failed
+// sends. Walks {userId}/ folders; capped so one run stays small.
+async function sweepStaging(supabase: ReturnType<typeof createClient>, maxAgeMs: number): Promise<string | number> {
+  const cutoff = Date.now() - maxAgeMs;
+  let removed = 0;
+  for (let offset = 0; offset < 2000; offset += 100) {
+    const { data: folders, error } = await supabase.storage.from("card-staging").list("", { limit: 100, offset });
+    if (error) return `list: ${error.message}`;
+    if (!folders || folders.length === 0) break;
+    for (const f of folders) {
+      if (f.id !== null) continue; // only user folders
+      const { data: files, error: fileError } = await supabase.storage.from("card-staging").list(f.name, { limit: 1000 });
+      if (fileError) return `list ${f.name}: ${fileError.message}`;
+      const old = (files ?? [])
+        .filter((o) => o.id !== null && o.created_at && new Date(o.created_at).getTime() < cutoff)
+        .map((o) => `${f.name}/${o.name}`);
+      if (old.length === 0) continue;
+      const { error: rmError } = await supabase.storage.from("card-staging").remove(old);
+      if (rmError) return `remove ${f.name}: ${rmError.message}`;
+      removed += old.length;
+    }
+    if (folders.length < 100) break;
+  }
+  return removed;
 }
 
 function json(body: unknown, status = 200): Response {

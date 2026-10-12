@@ -45,12 +45,17 @@ type ModerationItem = {
 
 export async function moderateContent(
   supabase: SupabaseClient,
-  input: { texts?: string[]; images?: Uint8Array[] },
+  // imageUrls: images OpenAI fetches itself (e.g. short-lived signed URLs of
+  // private staged files), so large files never pass through this function.
+  // key = a stable string for the file (its storage path), hashed as the
+  // fingerprint instead of the bytes.
+  input: { texts?: string[]; images?: Uint8Array[]; imageUrls?: { url: string; key: string }[] },
 ): Promise<ModerationVerdict> {
   // Duplicates are dropped (e.g. the message preview is part of the message).
   const texts = Array.from(new Set((input.texts ?? []).map((t) => t.trim()).filter((t) => t.length > 0)));
   const images = input.images ?? [];
-  if (texts.length === 0 && images.length === 0) return { status: "clean" };
+  const imageUrls = input.imageUrls ?? [];
+  if (texts.length === 0 && images.length === 0 && imageUrls.length === 0) return { status: "clean" };
 
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) {
@@ -83,6 +88,18 @@ export async function moderateContent(
       body: {
         model: "omni-moderation-latest",
         input: [{ type: "image_url", image_url: { url: `data:image/jpeg;base64,${toBase64(image)}` } }],
+      },
+    });
+  }
+
+  for (const { url, key } of imageUrls) {
+    calls.push({
+      kind: "photo",
+      inputs: [],
+      image: new TextEncoder().encode(key),
+      body: {
+        model: "omni-moderation-latest",
+        input: [{ type: "image_url", image_url: { url } }],
       },
     });
   }

@@ -1,11 +1,14 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { moderateAndPromote } from "../_shared/cardImages.ts";
+import { recordContentBlock } from "../_shared/contentBlocks.ts";
 
 // Submits an authorized (not yet charged — see migration 030) physical_orders
 // row to LOB's Postcards API. Can't render anything itself — the
 // print-resolution front/back images are rendered on-device (SwiftUI
-// ImageRenderer) and already uploaded to the public card-images bucket by
-// the time this runs; this function only takes their URLs and hands them to
-// LOB, plus the order's own address/size snapshot. On LOB acceptance, this
+// ImageRenderer) and already uploaded to the private card-staging bucket by
+// the time this runs; this function moderates the staged files, copies them
+// to the public card-images bucket (_shared/cardImages.ts) and hands those
+// URLs to LOB, plus the order's own address/size snapshot. On LOB acceptance, this
 // also captures the Stripe authorization hold (the actual charge); on LOB
 // rejection, it cancels the hold instead so the customer is never charged
 // for a postcard that never gets mailed.
@@ -42,7 +45,7 @@ Deno.serve(async (req) => {
     const { data: order, error: orderError } = await supabase
       .from("physical_orders")
       .select(`
-        id, sender_id, status, card_size, stripe_payment_intent_id,
+        id, sender_id, card_id, status, card_size, stripe_payment_intent_id,
         recipient_first_name, recipient_last_name, recipient_street,
         recipient_city, recipient_state, recipient_zip, recipient_country,
         sender_first_name, sender_last_name, sender_street,
@@ -80,6 +83,47 @@ Deno.serve(async (req) => {
     const expectedPrefix = `${supabaseURL}/storage/v1/object/public/card-images/${user.id}/`;
     if (!frontImageURL.startsWith(expectedPrefix) || !backImageURL.startsWith(expectedPrefix)) {
       return json({ error: "invalid_image_url" }, 400);
+    }
+
+    // ----------------------------------------------------------------
+    // The URLs only name two files in this sender's folder. The files
+    // themselves were staged privately by the app (or promoted by an earlier
+    // order). Moderate the staged ones, then copy them to the public bucket
+    // so LOB can fetch them: the app can't write the public bucket, so what
+    // LOB prints is exactly what was checked. A flagged file releases the
+    // payment hold and refuses the order.
+    // ----------------------------------------------------------------
+    const frontName = frontImageURL.slice(expectedPrefix.length);
+    const backName  = backImageURL.slice(expectedPrefix.length);
+    const cardPrefix = String(order.card_id).toLowerCase();
+    const printName = /^[0-9a-f-]{36}_(front|back)_forLOB_[A-Za-z0-9]+\.jpg$/;
+    if (!printName.test(frontName) || !printName.test(backName) ||
+        !frontName.startsWith(cardPrefix) || !backName.startsWith(cardPrefix)) {
+      return json({ error: "invalid_image_url" }, 400);
+    }
+    const promoted = await moderateAndPromote(supabase, user.id, cardPrefix, {
+      printNames: [frontName, backName],
+    });
+    if (promoted.status === "error") return json({ error: "moderation_unavailable" }, 503);
+    if (promoted.status === "missing") return json({ error: "images_missing", names: promoted.names }, 400);
+    if (promoted.status === "flagged") {
+      const verdict = promoted.verdict;
+      const outcome = await recordContentBlock(supabase, {
+        userId: user.id,
+        photo: verdict.photo,
+        text: verdict.text,
+        categories: verdict.categories,
+        fingerprints: verdict.fingerprints,
+        scores: verdict.scores,
+      });
+      const cancelError = await releaseHold(supabase, order, "Content flagged by moderation");
+      if (outcome.suspended) return json({ error: "suspended" }, 403);
+      return json({
+        error: "content_flagged",
+        categories: verdict.categories,
+        warning: outcome.warning,
+        holdReleaseFailed: cancelError !== null,
+      }, 422);
     }
 
     // ----------------------------------------------------------------
@@ -131,34 +175,8 @@ Deno.serve(async (req) => {
       console.error("LOB postcard creation error:", lobResult);
       // Release the authorization hold — LOB rejected the postcard, so the
       // customer should never actually be charged for it (see migration 030).
-      let cancelError: string | null = null;
-      if (order.stripe_payment_intent_id) {
-        const cancelResponse = await fetch(
-          `https://api.stripe.com/v1/payment_intents/${order.stripe_payment_intent_id}/cancel`,
-          { method: "POST", headers: { "Authorization": "Basic " + btoa(`${stripeKey}:`) } }
-        );
-        if (!cancelResponse.ok) {
-          const cancelResult = await cancelResponse.json();
-          console.error("Stripe cancel error:", cancelResult);
-          cancelError = cancelResult?.error?.message ?? "cancel failed";
-        }
-      }
-      // A free (promo) order has no PaymentIntent and recorded its promo
-      // redemption up front — release that slot so a failed attempt doesn't
-      // burn a limited code (see create-postcard-payment-intent).
-      if (!order.stripe_payment_intent_id) {
-        await supabase.from("promo_code_redemptions").delete().eq("order_id", order.id);
-      }
       const lobMessage = lobResult?.error?.message ?? "LOB submission failed";
-      await supabase
-        .from("physical_orders")
-        .update({
-          status: "failed",
-          error_message: cancelError
-            ? `${lobMessage} (hold release failed: ${cancelError} — needs manual refund)`
-            : lobMessage,
-        })
-        .eq("id", order.id);
+      await releaseHold(supabase, order, lobMessage);
       return json({ error: "lob_error", detail: lobMessage }, 502);
     }
 
@@ -234,6 +252,45 @@ function normalizeCountry(value: string | null): string {
     "u.s.": "US",
   };
   return knownNames[trimmed.toLowerCase()] ?? "US";
+}
+
+// Releases the Stripe authorization hold (or the promo redemption for a free
+// order) and marks the order failed. Returns an error message if the hold
+// could not be released (needs a manual refund), else null.
+async function releaseHold(
+  supabase: ReturnType<typeof createClient>,
+  order: { id: string; stripe_payment_intent_id: string | null },
+  reason: string,
+): Promise<string | null> {
+  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY")!;
+  let cancelError: string | null = null;
+  if (order.stripe_payment_intent_id) {
+    const cancelResponse = await fetch(
+      `https://api.stripe.com/v1/payment_intents/${order.stripe_payment_intent_id}/cancel`,
+      { method: "POST", headers: { "Authorization": "Basic " + btoa(`${stripeKey}:`) } }
+    );
+    if (!cancelResponse.ok) {
+      const cancelResult = await cancelResponse.json();
+      console.error("Stripe cancel error:", cancelResult);
+      cancelError = cancelResult?.error?.message ?? "cancel failed";
+    }
+  }
+  // A free (promo) order has no PaymentIntent and recorded its promo
+  // redemption up front — release that slot so a failed attempt doesn't
+  // burn a limited code (see create-postcard-payment-intent).
+  if (!order.stripe_payment_intent_id) {
+    await supabase.from("promo_code_redemptions").delete().eq("order_id", order.id);
+  }
+  await supabase
+    .from("physical_orders")
+    .update({
+      status: "failed",
+      error_message: cancelError
+        ? `${reason} (hold release failed: ${cancelError} — needs manual refund)`
+        : reason,
+    })
+    .eq("id", order.id);
+  return cancelError;
 }
 
 function json(body: unknown, status = 200): Response {

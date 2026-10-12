@@ -1,6 +1,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isBanned } from "../_shared/bans.ts";
-import { moderateContent } from "../_shared/moderation.ts";
+import { moderateAndPromote } from "../_shared/cardImages.ts";
 import { recordContentBlock } from "../_shared/contentBlocks.ts";
 import { removeFolder } from "../_shared/purgeCard.ts";
 
@@ -126,21 +126,52 @@ Deno.serve(async (req) => {
     }
 
     // ----------------------------------------------------------------
+    // Send-rate cap: send-card calls per hour / per day for this sender,
+    // counted from send_events (server-written, no foreign key to cards, so
+    // resending a card counts again and deleting a card resets nothing).
+    // Applies to every tier. Each call that gets past this check is recorded,
+    // including ones the content gate later rejects.
+    // ----------------------------------------------------------------
+    {
+      const { data: rateRows } = await supabase
+        .from("zz_config")
+        .select("key, value")
+        .in("key", ["send_rate_hourly", "send_rate_daily"]);
+      const rate: Record<string, number> = {};
+      for (const row of rateRows ?? []) rate[row.key] = parseInt(row.value, 10);
+      const hourlyCap = rate["send_rate_hourly"] ?? 10;
+      const dailyCap  = rate["send_rate_daily"]  ?? 50;
+
+      const countSince = async (ms: number) => {
+        const { count } = await supabase
+          .from("send_events")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", user.id)
+          .gte("created_at", new Date(Date.now() - ms).toISOString());
+        return count ?? 0;
+      };
+      if (hourlyCap >= 0 && await countSince(60 * 60 * 1000) >= hourlyCap) {
+        return json({ error: "rate_limited", window: "hour" }, 429);
+      }
+      if (dailyCap >= 0 && await countSince(24 * 60 * 60 * 1000) >= dailyCap) {
+        return json({ error: "rate_limited", window: "day" }, 429);
+      }
+      await supabase.from("send_events").insert({ user_id: user.id, card_id: cardID });
+    }
+
+    // ----------------------------------------------------------------
     // Content-safety gate: everything this function can see is checked
     // server-side, so a modified app can't skip the app's own checks. That is
-    // the nicknames, message preview, ink messages, and the already-uploaded
-    // front and back images (images over 4 MB are not checked; the web-size
-    // copies are far smaller). Fails closed. A rejected card's uploaded
-    // images are public, so they are removed.
+    // the nicknames, message preview, ink messages, other typed text, and
+    // every image file the app staged for this card (card-staging, private).
+    // Files that pass are copied to the public card-images bucket by
+    // _shared/cardImages.ts, so nothing public is ever written by the app and
+    // an image can't be swapped after it was checked. Fails closed. A rejected
+    // card's staged files are removed.
     // ----------------------------------------------------------------
     {
       const cardPath = cardID.toLowerCase();
-      const images: Uint8Array[] = [];
-      for (const name of [`${cardPath}.jpg`, `${cardPath}_back.jpg`]) {
-        const { data: blob } = await supabase.storage.from("card-images").download(`${user.id}/${name}`);
-        if (blob && blob.size <= 4 * 1024 * 1024) images.push(new Uint8Array(await blob.arrayBuffer()));
-      }
-      const verdict = await moderateContent(supabase, {
+      const result = await moderateAndPromote(supabase, user.id, cardPath, {
         // The fields saved on the card, plus the app's list of every other
         // typed text (full message, captions, greetings banner, border text).
         // Capped so a request can't make the check unreasonably large.
@@ -150,10 +181,12 @@ Deno.serve(async (req) => {
         ]
           .filter((t): t is string => typeof t === "string")
           .map((t) => t.slice(0, 2000)),
-        images,
+        requireWeb: true,
       });
-      if (verdict.status === "error") return json({ error: "moderation_unavailable" }, 503);
-      if (verdict.status === "flagged") {
+      if (result.status === "error") return json({ error: "moderation_unavailable" }, 503);
+      if (result.status === "missing") return json({ error: "images_missing", names: result.names }, 400);
+      if (result.status === "flagged") {
+        const verdict = result.verdict;
         await removeFolder(supabase, "card-images", user.id, cardPath);
         // Record the block and apply the strike rules (blocked photos and
         // harassment count; see _shared/contentBlocks.ts).
@@ -164,7 +197,7 @@ Deno.serve(async (req) => {
           text: verdict.text,
           categories: verdict.categories,
           fingerprints: verdict.fingerprints,
-        scores: verdict.scores,
+          scores: verdict.scores,
         });
         if (outcome.suspended) return json({ error: "suspended" }, 403);
         return json({ error: "content_flagged", categories: verdict.categories, warning: outcome.warning }, 422);

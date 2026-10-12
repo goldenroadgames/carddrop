@@ -62,9 +62,13 @@ struct SuspendedView: View {
             Image(systemName: "hand.raised.fill")
                 .font(.system(size: 56))
                 .foregroundColor(.secondary)
+            // So the screen says whose app this is (a bare stop sign is scary),
+            // in the same gray as the hand above; reads as "CardDrop / <title>".
+            CardDropWordmark(size: 28, dropOffset: 6, color: .secondary)
             if isFinal {
                 Text("Device Disabled")
                     .font(.title2.weight(.semibold))
+                    .foregroundColor(.secondary)
                 Text(finalParagraph)
                     .font(.body)
                     .multilineTextAlignment(.center)
@@ -79,6 +83,7 @@ struct SuspendedView: View {
             } else {
                 Text("Account Suspended")
                     .font(.title2.weight(.semibold))
+                    .foregroundColor(.secondary)
                 Text("Your account has been suspended for violating our content standards or complaints about cards you sent.")
                     .font(.body)
                     .multilineTextAlignment(.center)

@@ -20,6 +20,7 @@ enum CardUploadService {
         case lifetimeLimitReached(tier: String)
         case contentFlagged(warning: String?)
         case moderationUnavailable
+        case rateLimited
 
         var errorDescription: String? {
             switch self {
@@ -40,6 +41,8 @@ enum CardUploadService {
                 return warning.map { base + "\n\n" + $0 } ?? base
             case .moderationUnavailable:
                 return "We can't check your card right now. Please try again in a moment."
+            case .rateLimited:
+                return "You're sending cards faster than we allow. Please try again in a little while. If you think this is a mistake, contact support@carddropapp.com."
             }
         }
 
@@ -163,10 +166,12 @@ enum CardUploadService {
 
     // MARK: - Digital card images
 
-    /// Uploads the digital-resolution front/back(+6x9) images to
-    /// card-images/{senderID}/{cardID}.jpg / _back.jpg / _back6x9.jpg — the
-    /// exact paths the webapp's /card/[id] page reads (see
-    /// web/app/card/[id]/page.tsx). Every card needs these, not just
+    /// Uploads the digital-resolution front/back(+6x9) images to the PRIVATE
+    /// card-staging bucket at {senderID}/{cardID}.jpg / _back.jpg / _back6x9.jpg.
+    /// The send-card / submit-to-lob edge functions moderate them and copy
+    /// them to the public card-images bucket (the exact paths the webapp's
+    /// /card/[id] page reads, see web/app/card/[id]/page.tsx); the app can't
+    /// write card-images itself. Every card needs these, not just
     /// digitally-sent ones: a physical postcard's back-of-card QR code links
     /// to /card/{cardID} too, so without this upload that link 404s even
     /// though the card was successfully mailed.
@@ -188,7 +193,7 @@ enum CardUploadService {
         let webBack6x9Data = back6x9Data.map { webSizedJPEG($0) }
 
         try await supabase.storage
-            .from("card-images")
+            .from("card-staging")
             .upload(
                 "\(senderID)/\(idStr).jpg",
                 data: webFrontData,
@@ -196,7 +201,7 @@ enum CardUploadService {
             )
 
         try await supabase.storage
-            .from("card-images")
+            .from("card-staging")
             .upload(
                 "\(senderID)/\(idStr)_back.jpg",
                 data: webBackData,
@@ -207,7 +212,7 @@ enum CardUploadService {
         // marketing print use. The admin marketing tool copies it across; no
         // app or web view loads it.
         try await supabase.storage
-            .from("card-images")
+            .from("card-staging")
             .upload(
                 "\(senderID)/\(idStr)_full.jpg",
                 data: frontData,
@@ -216,7 +221,7 @@ enum CardUploadService {
 
         if let thumbData = scaledDownThumbnail(fromFrontData: frontData) {
             try await supabase.storage
-                .from("card-images")
+                .from("card-staging")
                 .upload(
                     "\(senderID)/\(idStr)_thumb.jpg",
                     data: thumbData,
@@ -226,7 +231,7 @@ enum CardUploadService {
 
         if let back6x9Data = webBack6x9Data {
             try await supabase.storage
-                .from("card-images")
+                .from("card-staging")
                 .upload(
                     "\(senderID)/\(idStr)_back6x9.jpg",
                     data: back6x9Data,
@@ -246,7 +251,7 @@ enum CardUploadService {
             // loads it.
             if let beforeFullData = beforeImage.jpegData(compressionQuality: 0.85) {
                 try await supabase.storage
-                    .from("card-images")
+                    .from("card-staging")
                     .upload(
                         "\(senderID)/\(idStr)_before_full.jpg",
                         data: beforeFullData,
@@ -255,7 +260,7 @@ enum CardUploadService {
             }
             if let beforeData = resizedJPEG(from: beforeImage, maxDimension: 1500, quality: 0.75) {
                 try await supabase.storage
-                    .from("card-images")
+                    .from("card-staging")
                     .upload(
                         "\(senderID)/\(idStr)_before.jpg",
                         data: beforeData,
@@ -264,7 +269,7 @@ enum CardUploadService {
             }
             if let beforeThumbData = resizedJPEG(from: beforeImage, maxDimension: 600, quality: 0.6) {
                 try await supabase.storage
-                    .from("card-images")
+                    .from("card-staging")
                     .upload(
                         "\(senderID)/\(idStr)_before_thumb.jpg",
                         data: beforeThumbData,
@@ -324,7 +329,10 @@ enum CardUploadService {
     // MARK: - LOB export upload
 
     /// Uploads a front/back pair produced by `CardRenderer.renderLOBTestExport`
-    /// to the public card-images bucket. Used both by the DEBUG-only manual
+    /// to the private card-staging bucket (submit-to-lob moderates them and
+    /// copies them to the public card-images bucket for LOB). The returned
+    /// URLs are the FINAL public card-images URLs, which only exist once
+    /// submit-to-lob has run. Used both by the DEBUG-only manual
     /// LOB test buttons and by the real physical-mail send flow (after
     /// payment succeeds, before calling submit-to-lob) — `sizeLabel` (e.g.
     /// "4x6"/"6x9") just disambiguates the filenames so repeated
@@ -368,10 +376,10 @@ enum CardUploadService {
         let frontPath = "\(senderID)/\(idStr)_front_forLOB_\(sizeLabel).jpg"
         let backPath  = "\(senderID)/\(idStr)_back_forLOB_\(sizeLabel).jpg"
 
-        try await supabase.storage.from("card-images").upload(
+        try await supabase.storage.from("card-staging").upload(
             frontPath, data: frontData, options: FileOptions(contentType: "image/jpeg", upsert: true)
         )
-        try await supabase.storage.from("card-images").upload(
+        try await supabase.storage.from("card-staging").upload(
             backPath, data: backData, options: FileOptions(contentType: "image/jpeg", upsert: true)
         )
 
@@ -483,6 +491,7 @@ enum CardUploadService {
         case "lifetime_limit_reached": return .lifetimeLimitReached(tier: tier)
         case "content_flagged":        return .contentFlagged(warning: ModerationService.warningMessage(warning))
         case "moderation_unavailable": return .moderationUnavailable
+        case "rate_limited":           return .rateLimited
         default:                       return .edgeFunctionFailed(code)
         }
     }

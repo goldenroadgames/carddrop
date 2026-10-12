@@ -43,8 +43,10 @@ export async function deleteAccountData(supabase: SupabaseClient, uid: string): 
     .eq("sender_id", uid)
     .not("reported_at", "is", null);
   const keepPrefixes = (reportedCards ?? []).map((c) => c.id.toLowerCase());
-  const folderError = await removeFolderExcept(supabase, uid.toLowerCase(), keepPrefixes);
-  if (folderError) return fail("image folder", folderError);
+  for (const bucket of ["card-images", "card-staging", "card-private"]) {
+    const folderError = await removeFolderExcept(supabase, bucket, uid.toLowerCase(), keepPrefixes);
+    if (folderError) return fail("image folder", folderError);
+  }
 
   // 3. Orders: unlink the sender and drop the sender's own name/address; the
   //    recipient snapshot stays for the 12-month sweep. Address-book links
@@ -82,18 +84,19 @@ export async function deleteAccountData(supabase: SupabaseClient, uid: string): 
   return { ok: true };
 }
 
-// Removes every file in the user's card-images folder except those that belong
+// Removes every file in the user's folder of a card bucket except those that belong
 // to the kept (reported) cards, i.e. whose name starts with a kept card id.
 // Pages through with an offset so kept files don't stall the loop.
 async function removeFolderExcept(
   supabase: SupabaseClient,
+  bucket: string,
   folder: string,
   keepPrefixes: string[],
 ): Promise<string | null> {
   const toRemove: string[] = [];
   for (let offset = 0; offset < 5000; offset += 100) {
-    const { data, error } = await supabase.storage.from("card-images").list(folder, { limit: 100, offset });
-    if (error) return `card-images list: ${error.message}`;
+    const { data, error } = await supabase.storage.from(bucket).list(folder, { limit: 100, offset });
+    if (error) return `${bucket} list: ${error.message}`;
     if (!data || data.length === 0) break;
     for (const o of data) {
       if (o.id === null) continue; // sub-folder placeholder
@@ -103,8 +106,8 @@ async function removeFolderExcept(
     }
   }
   for (let i = 0; i < toRemove.length; i += 100) {
-    const { error } = await supabase.storage.from("card-images").remove(toRemove.slice(i, i + 100));
-    if (error) return `card-images remove: ${error.message}`;
+    const { error } = await supabase.storage.from(bucket).remove(toRemove.slice(i, i + 100));
+    if (error) return `${bucket} remove: ${error.message}`;
   }
   return null;
 }
