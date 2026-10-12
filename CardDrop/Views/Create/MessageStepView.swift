@@ -10,10 +10,14 @@ private enum MessageField: Hashable {
 struct MessageStepView: View {
     @ObservedObject var draft: PostcardDraft
     var onNext: () -> Void
+    // Jumps back to Style It, where captions and the greetings banner live —
+    // the flagged text may be there rather than on this step.
+    var onGoToStyleIt: () -> Void = {}
 
     @FocusState private var focus: MessageField?
     @State private var isModerating = false
     @State private var flaggedCategories: [String] = []
+    @State private var flaggedWarning: String? = nil
     @State private var showHardBlockAlert = false
     @State private var showUnavailableAlert = false
 
@@ -245,8 +249,9 @@ struct MessageStepView: View {
                         case .clean:
                             draft.moderationState = .passed
                             onNext()
-                        case .flagged(let categories):
+                        case .flagged(let categories, let warning):
                             flaggedCategories = categories
+                            flaggedWarning = warning
                             showHardBlockAlert = true
                         case .unavailable:
                             showUnavailableAlert = true
@@ -276,9 +281,10 @@ struct MessageStepView: View {
         }
         // Hard block — sexual, violence, self-harm, harassment (no override)
         .alert("Content Not Allowed", isPresented: $showHardBlockAlert) {
-            Button("Edit Message", role: .cancel) { }
+            Button("Edit Front") { onGoToStyleIt() }
+            Button("Edit Back") { }
         } message: {
-            Text("Your photo or text was flagged for: \(flaggedCategories.joined(separator: ", ")). Please check your photo, message, captions, greetings and names, then try again.")
+            Text("Your photo or text was flagged for: \(flaggedCategories.joined(separator: ", ")). Please check your photo, message, captions, greetings and names, then try again." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
         }
         .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
             Button("OK", role: .cancel) { }

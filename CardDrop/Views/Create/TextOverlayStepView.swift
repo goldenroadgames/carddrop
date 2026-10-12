@@ -412,6 +412,13 @@ struct TextOverlayStepView: View {
     @State private var isGeneratingSubjectCutout = false
     @State private var showingCaptionSheet = false
     @State private var showingGreetingsSheet = false
+    // Content-safety check on the captions and greetings banner when Next is
+    // tapped (the same check runs again on Write Card and at send time).
+    @State private var isModerating = false
+    @State private var flaggedCategories: [String] = []
+    @State private var flaggedWarning: String? = nil
+    @State private var showFlaggedAlert = false
+    @State private var showUnavailableAlert = false
     // Live-preview state for the Greetings quick-add sheet: a real badge is put
     // on the card when the sheet opens and edited as the user types. If the
     // sheet closes without Save, it's removed and the photo/cutout put back.
@@ -486,14 +493,52 @@ struct TextOverlayStepView: View {
                     addOverlayButtonsRow(imgSize: lastImgSize)
                         .opacity(isCoveringControlsOpen ? 0 : 1)
                         .allowsHitTesting(!isCoveringControlsOpen)
-                    Button(action: onNext) {
-                        Text("Next: Write Card")
-                            .font(.system(size: 17, weight: .semibold))
+                    Button {
+                        if draft.moderationState == .passed {
+                            onNext()
+                            return
+                        }
+                        Task {
+                            isModerating = true
+                            let result = await ModerationService.check(texts: draft.userTypedTexts)
+                            isModerating = false
+                            switch result {
+                            case .clean:
+                                draft.moderationState = .passed
+                                onNext()
+                            case .flagged(let categories, let warning):
+                                flaggedCategories = categories
+                                flaggedWarning = warning
+                                showFlaggedAlert = true
+                            case .unavailable:
+                                showUnavailableAlert = true
+                            }
+                        }
+                    } label: {
+                        Group {
+                            if isModerating {
+                                ProgressView().tint(.white)
+                            } else {
+                                Text("Next: Write Card")
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                        }
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
                             .background(Color.brandBlue)
                             .foregroundColor(.white)
                             .cornerRadius(999)
+                    }
+                    .disabled(isModerating)
+                    .alert("Content Not Allowed", isPresented: $showFlaggedAlert) {
+                        Button("OK", role: .cancel) { }
+                    } message: {
+                        Text("Your photo or text was flagged for: \(flaggedCategories.joined(separator: ", ")). Please check your photo, captions and greetings, then try again." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
+                    }
+                    .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
+                        Button("OK", role: .cancel) { }
+                    } message: {
+                        Text("We can't check your content right now. Please try again in a moment.")
                     }
                     .allowsHitTesting(!isCoveringControlsOpen)
                     .padding(.horizontal)

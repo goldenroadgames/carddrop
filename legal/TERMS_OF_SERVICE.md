@@ -47,6 +47,8 @@ You agree not to use the Service to:
 
 We reserve the right to review, remove, or refuse to process any content submitted for printing, and to suspend or terminate accounts that violate this section, at our discretion.
 
+**Automated checks.** We automatically check the photos and text you add to a card, and the names and addresses you use for mailing. Content that is blocked cannot be sent. If an account repeatedly submits blocked photos or harassing content, we may suspend it and the devices it uses, without further notice.
+
 **Reports from recipients.** Anyone who receives a card can report it. If a recipient reports a card you sent, you will be warned and you will no longer be able to mail to that recipient's address; if you are reported repeatedly, we will suspend your account and the devices you use, without further notice. Digital cards are sent from your own device through your own messaging and email apps, not by us, and you are solely responsible for the cards you send and the recipients you choose. A card that is reported is hidden and locked: you will not be able to view it in the app, delete, resend or copy it, and we keep it for 12 months before deleting it, even if you delete your account.
 
 **Replies.** Anyone who opens a card link can reply to it, so replies come from people we don't know and don't control. Replies must follow the rules in this section. We check replies automatically and may refuse any reply, and we limit how many can be sent from one connection. These checks are not perfect, and we do not guarantee that harmful replies will never reach you. You can turn replies off for any card or for your whole account, and you can delete individual replies, in the app.

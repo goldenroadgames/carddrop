@@ -28,6 +28,7 @@ struct PostcardAddressStepView: View {
     // (create-postcard-payment-intent repeats it server-side before any charge).
     @State private var isCheckingContent = false
     @State private var flaggedCategories: [String] = []
+    @State private var flaggedWarning: String? = nil
     @State private var showFlaggedAlert = false
     @State private var showUnavailableAlert = false
 
@@ -152,8 +153,9 @@ struct PostcardAddressStepView: View {
                             switch result {
                             case .clean:
                                 onContinue(selectedSender, selectedRecipient, price)
-                            case .flagged(let categories):
+                            case .flagged(let categories, let warning):
                                 flaggedCategories = categories
+                                flaggedWarning = warning
                                 showFlaggedAlert = true
                             case .unavailable:
                                 showUnavailableAlert = true
@@ -205,7 +207,7 @@ struct PostcardAddressStepView: View {
             .alert("Content Not Allowed", isPresented: $showFlaggedAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("A name or address was flagged for: \(flaggedCategories.joined(separator: ", ")). Please edit the address and try again.")
+                Text("A name or address was flagged for: \(flaggedCategories.joined(separator: ", ")). Please edit the address and try again." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
             }
             .alert("Can't Check Addresses", isPresented: $showUnavailableAlert) {
                 Button("OK", role: .cancel) {}

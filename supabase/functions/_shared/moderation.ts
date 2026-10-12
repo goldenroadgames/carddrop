@@ -11,7 +11,12 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 // Fails closed: if OpenAI can't be reached the verdict is "error".
 export type ModerationVerdict =
   | { status: "clean" }
-  | { status: "flagged"; categories: string[] }
+  // photo / text say which kind of input was flagged (used by the strike rules
+  // in contentBlocks.ts: a blocked photo counts, blocked text only if harassment).
+  // fingerprints = one-way hash of EACH flagged text/photo, so the same flagged
+  // item tried again can be counted once even if other items on the card change
+  // (contentBlocks.ts).
+  | { status: "flagged"; categories: string[]; photo: boolean; text: boolean; fingerprints: string[] }
   | { status: "error" };
 
 // Human-readable names shown to the user (same labels the app used).
@@ -61,35 +66,81 @@ export async function moderateContent(
     if (!Number.isNaN(score)) thresholds[r.key.replace("moderation_threshold_", "")] = score;
   }
 
-  const bodies: unknown[] = [];
+  const calls: { kind: "text" | "photo"; body: unknown; inputs: string[]; image?: Uint8Array }[] = [];
   // One call carries up to 25 texts, each scored separately (a longer list
   // is split into batches, so nothing is left unchecked).
   for (let i = 0; i < texts.length; i += 25) {
-    bodies.push({ model: "omni-moderation-latest", input: texts.slice(i, i + 25) });
+    const batch = texts.slice(i, i + 25);
+    calls.push({ kind: "text", body: { model: "omni-moderation-latest", input: batch }, inputs: batch });
   }
   for (const image of images) {
-    bodies.push({
-      model: "omni-moderation-latest",
-      input: [{ type: "image_url", image_url: { url: `data:image/jpeg;base64,${toBase64(image)}` } }],
+    calls.push({
+      kind: "photo",
+      inputs: [],
+      image,
+      body: {
+        model: "omni-moderation-latest",
+        input: [{ type: "image_url", image_url: { url: `data:image/jpeg;base64,${toBase64(image)}` } }],
+      },
     });
   }
 
-  const results = await Promise.all(bodies.map((b) => callModeration(apiKey, b)));
-  if (results.some((r) => r === null)) return { status: "error" };
+  const results = await Promise.all(
+    calls.map(async (c) => ({ call: c, items: await callModeration(apiKey, c.body) })),
+  );
+  if (results.some((r) => r.items === null)) return { status: "error" };
 
   const flagged = new Set<string>();
-  for (const items of results as ModerationItem[][]) {
-    for (const item of items) {
+  const flaggedTexts = new Set<string>();
+  const flaggedImages: Uint8Array[] = [];
+  let photoFlagged = false;
+  let textFlagged = false;
+  for (const r of results) {
+    const items = r.items as ModerationItem[];
+    // OpenAI returns one result per input string, in order. If that ever
+    // doesn't hold, a flagged result can't be tied to one string, so the whole
+    // batch is treated as the flagged item (conservative, never skips a check).
+    const aligned = r.call.kind === "photo" || items.length === r.call.inputs.length;
+    items.forEach((item, idx) => {
+      let itemFlagged = false;
       for (const [category, on] of Object.entries(item.categories ?? {})) {
         if (on && (item.category_scores?.[category] ?? 1) >= (thresholds[category] ?? 0)) {
           flagged.add(LABELS[category] ?? category);
+          itemFlagged = true;
         }
       }
-    }
+      if (!itemFlagged) return;
+      if (r.call.kind === "photo") {
+        photoFlagged = true;
+        if (r.call.image) flaggedImages.push(r.call.image);
+      } else {
+        textFlagged = true;
+        if (aligned) {
+          if (r.call.inputs[idx] !== undefined) flaggedTexts.add(r.call.inputs[idx]);
+        } else {
+          for (const t of r.call.inputs) flaggedTexts.add(t);
+        }
+      }
+    });
   }
-  return flagged.size === 0
-    ? { status: "clean" }
-    : { status: "flagged", categories: Array.from(flagged).sort() };
+  if (flagged.size === 0) return { status: "clean" };
+
+  const fingerprints = await Promise.all([
+    ...Array.from(flaggedTexts).map((t) => sha256Hex(new TextEncoder().encode(t))),
+    ...flaggedImages.map((img) => sha256Hex(img)),
+  ]);
+  return {
+    status: "flagged",
+    categories: Array.from(flagged).sort(),
+    photo: photoFlagged,
+    text: textFlagged,
+    fingerprints: Array.from(new Set(fingerprints)),
+  };
+}
+
+async function sha256Hex(data: Uint8Array): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+  return Array.from(digest, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function callModeration(apiKey: string, body: unknown): Promise<ModerationItem[] | null> {

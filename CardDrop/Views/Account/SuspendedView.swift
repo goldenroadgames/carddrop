@@ -14,7 +14,7 @@ struct SuspendedView: View {
                 .foregroundColor(.secondary)
             Text("Account Suspended")
                 .font(.title2.weight(.semibold))
-            Text("Your account has been suspended because of complaints about cards you sent.")
+            Text("Your account has been suspended for violating our content standards or complaints about cards you sent.")
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)

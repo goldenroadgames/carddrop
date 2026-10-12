@@ -59,6 +59,8 @@ Deno.serve(async (req) => {
         scrubbed_at: new Date().toISOString(),
       }).lt("created_at", cutoff).is("scrubbed_at", null)],
       ["send_log", supabase.from("card_recipients").delete().lt("created_at", cutoff)],
+      // Records of content blocked by moderation (no content, just who/kind/category/time).
+      ["content_blocks", supabase.from("content_blocks").delete().lt("created_at", cutoff)],
     ];
     for (const [name, op] of steps) {
       const { error: opError } = await op;

@@ -50,6 +50,7 @@ struct ChoosePhotoStepView: View {
     @State private var pendingLowResImage: UIImage? = nil
     @State private var showLowResAlert = false
     @State private var flaggedCategories: [String] = []
+    @State private var flaggedWarning: String? = nil
     @State private var showModerationAlert = false
     @State private var showUnavailableAlert = false
     @State private var cachedFilteredImage: UIImage? = nil
@@ -242,7 +243,7 @@ struct ChoosePhotoStepView: View {
         .alert("Photo Not Allowed", isPresented: $showModerationAlert) {
             Button("Choose a Different Photo", role: .cancel) { isPickerPresented = true }
         } message: {
-            Text("That photo was flagged for: \(flaggedCategories.joined(separator: ", ")). Please choose a different photo.")
+            Text("That photo was flagged for: \(flaggedCategories.joined(separator: ", ")). Please choose a different photo." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
         }
         .alert("Can't Check Photo", isPresented: $showUnavailableAlert) {
             Button("OK", role: .cancel) { }
@@ -261,8 +262,9 @@ struct ChoosePhotoStepView: View {
             isModerating = false
 
             switch result {
-            case .flagged(let categories):
+            case .flagged(let categories, let warning):
                 flaggedCategories = categories
+                flaggedWarning = warning
                 showModerationAlert = true
                 return
             case .unavailable:

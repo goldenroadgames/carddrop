@@ -18,7 +18,7 @@ enum CardUploadService {
         case suspended
         case monthlyLimitReached(tier: String)
         case lifetimeLimitReached(tier: String)
-        case contentFlagged
+        case contentFlagged(warning: String?)
         case moderationUnavailable
 
         var errorDescription: String? {
@@ -35,8 +35,9 @@ enum CardUploadService {
                 return monthlyLimitMessage(tier: tier)
             case .lifetimeLimitReached(let tier):
                 return lifetimeLimitMessage(tier: tier)
-            case .contentFlagged:
-                return "This card can't be sent because it may not meet our content standards."
+            case .contentFlagged(let warning):
+                let base = "This card can't be sent because it may not meet our content standards."
+                return warning.map { base + "\n\n" + $0 } ?? base
             case .moderationUnavailable:
                 return "We can't check your card right now. Please try again in a moment."
             }
@@ -423,6 +424,7 @@ enum CardUploadService {
             let sendsRemainingLifetime: Int?
             let tier: String?
             let error: String?
+            let warning: String?   // content_flagged: "warn" | "final" | "none"
         }
 
         let body = RequestBody(
@@ -447,7 +449,7 @@ enum CardUploadService {
 
             // Edge function returned 2xx — check for embedded error field
             if let errorCode = response.error {
-                throw mapEdgeError(errorCode, tier: response.tier ?? "anonymous")
+                throw mapEdgeError(errorCode, tier: response.tier ?? "anonymous", warning: response.warning)
             }
 
             guard let urlString = response.cardURL, let url = URL(string: urlString) else {
@@ -468,7 +470,7 @@ enum CardUploadService {
             if case .httpError(_, let data) = fnError,
                let body = try? JSONDecoder().decode(ResponseBody.self, from: data),
                let errorCode = body.error {
-                throw mapEdgeError(errorCode, tier: body.tier ?? "anonymous")
+                throw mapEdgeError(errorCode, tier: body.tier ?? "anonymous", warning: body.warning)
             }
             throw UploadError.edgeFunctionFailed(fnError.localizedDescription)
         } catch {
@@ -476,12 +478,12 @@ enum CardUploadService {
         }
     }
 
-    private static func mapEdgeError(_ code: String, tier: String) -> UploadError {
+    private static func mapEdgeError(_ code: String, tier: String, warning: String? = nil) -> UploadError {
         switch code {
         case "suspended":              return .suspended
         case "monthly_limit_reached":  return .monthlyLimitReached(tier: tier)
         case "lifetime_limit_reached": return .lifetimeLimitReached(tier: tier)
-        case "content_flagged":        return .contentFlagged
+        case "content_flagged":        return .contentFlagged(warning: ModerationService.warningMessage(warning))
         case "moderation_unavailable": return .moderationUnavailable
         default:                       return .edgeFunctionFailed(code)
         }

@@ -4,7 +4,9 @@ import Supabase
 
 enum ModerationResult {
     case clean
-    case flagged([String])   // human-readable category names
+    // Human-readable category names, plus an optional warning that repeated
+    // blocked content can lead to suspension (see ModerationService.warningMessage).
+    case flagged([String], warning: String?)
     case unavailable         // the check couldn't run (offline, server error): block and ask to retry
 }
 
@@ -21,11 +23,24 @@ struct ModerationService {
     private struct Request: Encodable {
         let texts: [String]?
         let image: String?   // base64 JPEG
+        let deviceUUID: String
     }
 
     private struct Response: Decodable {
         let status: String
         let categories: [String]?
+        let warning: String?    // "warn" | "final" | "none"
+        let suspended: Bool?
+    }
+
+    /// Wording for the server's repeated-blocked-content warning levels. The
+    /// server counts blocked photos and harassment flags toward a suspension.
+    static func warningMessage(_ level: String?) -> String? {
+        switch level {
+        case "warn":  return "Repeated blocked content may lead to your account being suspended."
+        case "final": return "Your next blocked item may suspend your account."
+        default:      return nil
+        }
     }
 
     /// Check one or more text strings.
@@ -33,14 +48,14 @@ struct ModerationService {
         let nonEmpty = texts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                             .filter { !$0.isEmpty }
         guard !nonEmpty.isEmpty else { return .clean }
-        return await perform(Request(texts: nonEmpty, image: nil))
+        return await perform(Request(texts: nonEmpty, image: nil, deviceUUID: UserService.deviceUUID.uuidString))
     }
 
     /// Check an image (resized to 512px max to keep payload small).
     static func check(image: UIImage) async -> ModerationResult {
         let resized = image.moderationThumbnail()
         guard let jpeg = resized.jpegData(compressionQuality: 0.7) else { return .unavailable }
-        return await perform(Request(texts: nil, image: jpeg.base64EncodedString()))
+        return await perform(Request(texts: nil, image: jpeg.base64EncodedString(), deviceUUID: UserService.deviceUUID.uuidString))
     }
 
     // MARK: - Request
@@ -50,7 +65,12 @@ struct ModerationService {
             let response: Response = try await supabase.functions
                 .invoke("moderate-content", options: FunctionInvokeOptions(body: body))
             if response.status == "flagged" {
-                return .flagged(response.categories ?? [])
+                if response.suspended == true {
+                    // Too many blocked items: the account was just suspended.
+                    SuspensionMonitor.trigger()
+                    return .flagged(response.categories ?? [], warning: "Your account has been suspended.")
+                }
+                return .flagged(response.categories ?? [], warning: warningMessage(response.warning))
             }
             return .clean
         } catch {

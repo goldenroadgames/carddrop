@@ -1,13 +1,15 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { moderateContent } from "../_shared/moderation.ts";
+import { recordContentBlock } from "../_shared/contentBlocks.ts";
 
 // Content-safety check for the iOS app's create steps. The app used to call
 // OpenAI directly with a key compiled into the binary; now it calls this
 // function (signed in, anonymous sign-ins included) and the key stays on the
 // server (OPENAI_API_KEY secret).
 //
-// Body: { texts?: string[], image?: string }  (image = base64 JPEG)
-// Reply: { status: "clean" } | { status: "flagged", categories: string[] }
+// Body: { texts?: string[], image?: string, deviceUUID?: string }  (image = base64 JPEG)
+// Reply: { status: "clean" } |
+//        { status: "flagged", categories, warning: "none"|"warn"|"final", suspended }
 // If the check can't run: HTTP 503 { error: "try_later" }. The app treats that
 // as "can't check right now" and blocks the step with a "try again" message;
 // send-card also re-checks everything it receives before a card is stored, and
@@ -49,7 +51,24 @@ Deno.serve(async (req) => {
 
     const verdict = await moderateContent(supabase, { texts, images });
     if (verdict.status === "error") return json({ error: "try_later" }, 503);
-    if (verdict.status === "flagged") return json({ status: "flagged", categories: verdict.categories });
+    if (verdict.status === "flagged") {
+      // Record the block and apply the strike rules (blocked photos and
+      // harassment count; see _shared/contentBlocks.ts).
+      const outcome = await recordContentBlock(supabase, {
+        userId: user.id,
+        deviceUUID: typeof body.deviceUUID === "string" ? body.deviceUUID : null,
+        photo: verdict.photo,
+        text: verdict.text,
+        categories: verdict.categories,
+        fingerprints: verdict.fingerprints,
+      });
+      return json({
+        status: "flagged",
+        categories: verdict.categories,
+        warning: outcome.warning,
+        suspended: outcome.suspended,
+      });
+    }
     return json({ status: "clean" });
   } catch (err) {
     console.error("moderate-content error:", err);

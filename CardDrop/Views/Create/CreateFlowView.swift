@@ -28,6 +28,7 @@ struct CreateFlowView: View {
 
     @State private var isModerating = false
     @State private var moderationFlagged: [String] = []
+    @State private var flaggedWarning: String? = nil
     @State private var showHardBlockAlert = false
     @State private var showUnavailableAlert = false
     // Mirrored from SendOptionsView's isSubmittingToLOB — blocks the
@@ -68,7 +69,7 @@ struct CreateFlowView: View {
                 case 2:
                     MessageStepView(draft: draft, onNext: {
                         currentStep = 4
-                    })
+                    }, onGoToStyleIt: { currentStep = 1 })
                 case 3:
                     InvisibleInkStepView(draft: draft, onNext: { currentStep = 4 })
                 case 4:
@@ -154,11 +155,11 @@ struct CreateFlowView: View {
 
             .onReceive(draft.objectWillChange) { _ in isDirty = true }
             .alert("Content Not Allowed", isPresented: $showHardBlockAlert) {
-                Button("Go to Style It") { currentStep = 1 }
-                Button("Go to Write Card") { currentStep = 2 }
+                Button("Edit Front") { currentStep = 1 }
+                Button("Edit Back") { currentStep = 2 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Your photo or text was flagged for: \(moderationFlagged.joined(separator: ", ")). Please check your photo, message, captions, greetings and names, then try again.")
+                Text("Your photo or text was flagged for: \(moderationFlagged.joined(separator: ", ")). Please check your photo, message, captions, greetings and names, then try again." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
             }
             .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
                 Button("OK", role: .cancel) {}
@@ -334,7 +335,7 @@ struct CreateFlowView: View {
                     }
 
                     let next = nextStep(from: currentStep)
-                    if currentStep >= 2 && draft.moderationState == .untested {
+                    if currentStep >= 1 && draft.moderationState == .untested {
                         Task {
                             isModerating = true
                             let result = await ModerationService.check(texts: messageTextsFromDraft)
@@ -343,8 +344,9 @@ struct CreateFlowView: View {
                             case .clean:
                                 draft.moderationState = .passed
                                 currentStep = next
-                            case .flagged(let categories):
+                            case .flagged(let categories, let warning):
                                 moderationFlagged = categories
+                                flaggedWarning = warning
                                 showHardBlockAlert = true
                             case .unavailable:
                                 showUnavailableAlert = true

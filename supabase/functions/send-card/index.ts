@@ -1,6 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isBanned } from "../_shared/bans.ts";
 import { moderateContent } from "../_shared/moderation.ts";
+import { recordContentBlock } from "../_shared/contentBlocks.ts";
 import { removeFolder } from "../_shared/purgeCard.ts";
 
 Deno.serve(async (req) => {
@@ -154,7 +155,18 @@ Deno.serve(async (req) => {
       if (verdict.status === "error") return json({ error: "moderation_unavailable" }, 503);
       if (verdict.status === "flagged") {
         await removeFolder(supabase, "card-images", user.id, cardPath);
-        return json({ error: "content_flagged", categories: verdict.categories }, 422);
+        // Record the block and apply the strike rules (blocked photos and
+        // harassment count; see _shared/contentBlocks.ts).
+        const outcome = await recordContentBlock(supabase, {
+          userId: user.id,
+          deviceUUID,
+          photo: verdict.photo,
+          text: verdict.text,
+          categories: verdict.categories,
+          fingerprints: verdict.fingerprints,
+        });
+        if (outcome.suspended) return json({ error: "suspended" }, 403);
+        return json({ error: "content_flagged", categories: verdict.categories, warning: outcome.warning }, 422);
       }
     }
 
