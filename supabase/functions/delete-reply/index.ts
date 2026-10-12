@@ -34,11 +34,11 @@ Deno.serve(async (req) => {
 
     const { data: card } = await supabase
       .from("cards")
-      .select("sender_id, reported_at")
+      .select("sender_id, reported_at, legal_hold")
       .eq("id", reply.card_id)
       .maybeSingle();
     if (!card || card.sender_id !== user.id) return json({ error: "unauthorized" }, 403);
-    if (card.reported_at) return json({ error: "unavailable" }, 403);
+    if (card.reported_at || card.legal_hold) return json({ error: "unavailable" }, 403);
 
     const { error: deleteError } = await supabase.from("replies").delete().eq("id", reply.id);
     if (deleteError) {

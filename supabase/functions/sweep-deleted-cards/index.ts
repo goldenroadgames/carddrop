@@ -24,6 +24,7 @@ Deno.serve(async (req) => {
       .select("id, sender_id")
       .not("deleted_at", "is", null)
       .is("purged_at", null)
+      .eq("legal_hold", false)
       .limit(50);
     if (error) return json({ error: error.message }, 500);
 
@@ -43,23 +44,36 @@ Deno.serve(async (req) => {
       purged++;
     }
 
-    // ---------------- retention (12 months) ----------------
-    // Complaint text, order name/address snapshots and the digital send log
-    // are kept 12 months. Financial columns on orders are kept (7 years).
-    const cutoff = new Date(Date.now() - 365 * 86400000).toISOString();
+    // ---------------- retention (retention_days, default 365) ----------------
+    // Complaint text, order name/address snapshots, the digital send log,
+    // moderation block records and reported cards are kept retention_days
+    // (zz_config). Financial columns on orders are kept (7 years).
+    const { data: retentionRow } = await supabase
+      .from("zz_config")
+      .select("value")
+      .eq("key", "retention_days")
+      .maybeSingle();
+    const retentionDays = parseInt(retentionRow?.value ?? "", 10);
+    const cutoff = new Date(Date.now() - (retentionDays > 0 ? retentionDays : 365) * 86400000).toISOString();
+    // Cards on legal hold keep their complaint text, send log and order
+    // snapshots too.
+    const { data: heldRows } = await supabase.from("cards").select("id").eq("legal_hold", true);
+    const heldList = `(${(heldRows ?? []).map((c: { id: string }) => c.id).join(",")})`;
+    // deno-lint-ignore no-explicit-any
+    const notHeld = (q: any) => ((heldRows ?? []).length > 0 ? q.not("card_id", "in", heldList) : q);
     const retention: Record<string, string | null> = {};
     const steps: [string, PromiseLike<{ error: { message: string } | null }>][] = [
-      ["complaint_text", supabase.from("card_complaints")
+      ["complaint_text", notHeld(supabase.from("card_complaints")
         .update({ complaint_text: null, sender_email: null }).lt("created_at", cutoff)
-        .or("complaint_text.not.is.null,sender_email.not.is.null")],
-      ["order_snapshots", supabase.from("physical_orders").update({
+        .or("complaint_text.not.is.null,sender_email.not.is.null"))],
+      ["order_snapshots", notHeld(supabase.from("physical_orders").update({
         recipient_first_name: null, recipient_last_name: null, recipient_street: null,
         recipient_city: null, recipient_state: null, recipient_zip: null, recipient_country: null,
         sender_first_name: null, sender_last_name: null, sender_street: null,
         sender_city: null, sender_state: null, sender_zip: null, sender_country: null,
         scrubbed_at: new Date().toISOString(),
-      }).lt("created_at", cutoff).is("scrubbed_at", null)],
-      ["send_log", supabase.from("card_recipients").delete().lt("created_at", cutoff)],
+      }).lt("created_at", cutoff).is("scrubbed_at", null))],
+      ["send_log", notHeld(supabase.from("card_recipients").delete().lt("created_at", cutoff))],
       // Records of content blocked by moderation (no content, just who/kind/category/time).
       ["content_blocks", supabase.from("content_blocks").delete().lt("created_at", cutoff)],
       // Send-rate cap log: the cap only looks back 24 hours, so keep 2 days.
@@ -75,7 +89,7 @@ Deno.serve(async (req) => {
     // Staged uploads that never became a card (private card-staging bucket).
     const staging = await sweepStaging(supabase, 2 * 86400000);
 
-    // Reported cards are kept as evidence for 12 months, then deleted like
+    // Reported cards are kept as evidence for retention_days, then deleted like
     // any other card (blanked tombstone + files purged).
     const { data: expiredReports } = await supabase
       .from("cards")
@@ -83,6 +97,7 @@ Deno.serve(async (req) => {
       .not("reported_at", "is", null)
       .lt("reported_at", cutoff)
       .is("deleted_at", null)
+      .eq("legal_hold", false)
       .limit(50);
     let reportedDeleted = 0;
     for (const card of expiredReports ?? []) {

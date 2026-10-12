@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
       // ---- one card ----
       const { data: card } = await supabase
         .from("cards")
-        .select("id, sender_id, reported_at")
+        .select("id, sender_id, reported_at, legal_hold")
         .eq("id", cardID)
         .maybeSingle();
       if (!card) return json({ status: "not_found" });
@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
         console.error("set-replies-enabled card update error:", error);
         return json({ error: "update_failed" }, 500);
       }
-      if (deleteExisting && !card.reported_at) {
+      if (deleteExisting && !card.reported_at && !card.legal_hold) {
         const clearError = await clearReplies(supabase, [card.id]);
         if (clearError) {
           console.error("set-replies-enabled clear error:", clearError);
@@ -78,6 +78,7 @@ Deno.serve(async (req) => {
           .select("id")
           .eq("sender_id", user.id)
           .is("reported_at", null)
+          .eq("legal_hold", false)
           .range(from, from + 999);
         if (listError) {
           console.error("set-replies-enabled list error:", listError);

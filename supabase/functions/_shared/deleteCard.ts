@@ -8,6 +8,11 @@ export async function deleteCard(
   supabase: SupabaseClient,
   card: { id: string; sender_id: string; deleted_at: string | null },
 ): Promise<string | null> {
+  // Last line of defence: a card on legal hold is never deleted, whichever
+  // caller got here.
+  const { data: held } = await supabase.from("cards").select("legal_hold").eq("id", card.id).maybeSingle();
+  if (held?.legal_hold) return "legal hold";
+
   if (!card.deleted_at) {
     const { error } = await supabase
       .from("cards")

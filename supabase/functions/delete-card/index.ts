@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
 
     const { data: card } = await supabase
       .from("cards")
-      .select("id, sender_id, deleted_at, purged_at, reported_at")
+      .select("id, sender_id, deleted_at, purged_at, reported_at, legal_hold")
       .eq("id", cardID)
       .maybeSingle();
 
@@ -33,7 +33,8 @@ Deno.serve(async (req) => {
     if (card.purged_at) return json({ status: "deleted" });
     // A reported card is kept as evidence: the sender can't delete it (only
     // deleting the whole account removes it).
-    if (card.reported_at && !card.deleted_at) return json({ error: "unavailable" }, 403);
+    // A card on legal hold is locked the same way.
+    if ((card.reported_at || card.legal_hold) && !card.deleted_at) return json({ error: "unavailable" }, 403);
 
     const deleteError = await deleteCard(supabase, card);
     if (deleteError) {

@@ -28,7 +28,8 @@ export async function deleteAccountData(supabase: SupabaseClient, uid: string): 
     .select("id, sender_id, deleted_at")
     .eq("sender_id", uid)
     .is("purged_at", null)
-    .is("reported_at", null);   // reported cards are kept as evidence
+    .is("reported_at", null)    // reported cards are kept as evidence
+    .eq("legal_hold", false);   // so are cards on legal hold
   if (cardsError) return fail("cards lookup", cardsError.message);
   for (const card of cards ?? []) {
     const err = await deleteCard(supabase, card);
@@ -41,7 +42,7 @@ export async function deleteAccountData(supabase: SupabaseClient, uid: string): 
     .from("cards")
     .select("id")
     .eq("sender_id", uid)
-    .not("reported_at", "is", null);
+    .or("reported_at.not.is.null,legal_hold.eq.true");
   const keepPrefixes = (reportedCards ?? []).map((c) => c.id.toLowerCase());
   for (const bucket of ["card-images", "card-staging", "card-private"]) {
     const folderError = await removeFolderExcept(supabase, bucket, uid.toLowerCase(), keepPrefixes);
