@@ -95,7 +95,10 @@ Deno.serve(async (req) => {
     // Suspended accounts that were never appealed or reinstated: housekeeping.
     const dormantSuspensions = await sweepDormantSuspensions(supabase);
 
-    return json({ purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions });
+    // "Delete data now" requests from the admin page.
+    const deleteRequests = await sweepDeleteRequests(supabase);
+
+    return json({ purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions, deleteRequests });
   } catch (err) {
     console.error("sweep-deleted-cards error:", err);
     return json({ error: "Internal server error" }, 500);
@@ -176,6 +179,40 @@ async function sweepFinalSuspensions(supabase: any): Promise<{ deleted: number; 
     const result = await deleteAccountData(supabase, ban.user_id);
     if (!result.ok) {
       console.error("final-suspension delete failed:", ban.user_id, result.step, result.message);
+      failed++;
+      continue;
+    }
+    await supabase
+      .from("account_bans")
+      .update({ purged_at: new Date().toISOString() })
+      .eq("user_id", ban.user_id)
+      .is("reinstated_at", null);
+    deleted++;
+  }
+  return { deleted, failed };
+}
+
+// Suspensions where the admin pressed "Delete data now" (delete_requested_at set):
+// deleted on this run, final or not, unless there is a legal hold. The ban rows
+// stay; purged_at stops a repeat.
+// deno-lint-ignore no-explicit-any
+async function sweepDeleteRequests(supabase: any): Promise<{ deleted: number; failed: number }> {
+  const { data: bans } = await supabase
+    .from("account_bans")
+    .select("user_id")
+    .is("reinstated_at", null)
+    .eq("legal_hold", false)
+    .is("purged_at", null)
+    .not("delete_requested_at", "is", null)
+    .not("user_id", "is", null)
+    .limit(50);
+
+  let deleted = 0;
+  let failed = 0;
+  for (const ban of bans ?? []) {
+    const result = await deleteAccountData(supabase, ban.user_id);
+    if (!result.ok) {
+      console.error("requested delete failed:", ban.user_id, result.step, result.message);
       failed++;
       continue;
     }

@@ -5,8 +5,8 @@ import Supabase
 /// A suspended user can still delete their account (App Store 5.1.1(v) and
 /// privacy law still apply), appeal the suspension with the form below, and
 /// read Help, the Terms and the Privacy Policy. A FINAL suspension (no appeal
-/// left, or a permanently banned device) gets the minimal "Account Disabled"
-/// screen: one line, the legal links, and Delete Account only for a real login.
+/// left, or a permanently banned device) gets the minimal "Device Disabled"
+/// screen: one line, the legal links, and Delete Account only when signed in.
 struct SuspendedView: View {
     /// True for a permanently disabled phone (known without a login): straight
     /// to the minimal "Account Disabled" screen, no server calls for appeals.
@@ -23,10 +23,23 @@ struct SuspendedView: View {
     // "about six months" / "about a month": how long until the account data is
     // deleted, read from the same settings the server uses.
     @State private var deletionPhrase: String?
+    // "about 30 days": the delay after a suspension becomes final, for the line on
+    // the minimal Device Disabled screen (works signed out: zz_config is public).
+    @State private var finalPhrase: String?
 
     // Until the server answers, the remembered answer decides, so a final account
     // never flashes the ordinary Suspended page.
     private var isFinal: Bool { forceFinal || (appealLoaded ? !canAppeal : monitor.knownFinal) }
+
+    // True in every final state (data still waiting or already gone), so it is
+    // safe to show whether or not anyone is signed in.
+    private var finalParagraph: String {
+        var text = "This device has been disabled."
+        if let finalPhrase {
+            text += " Any account data is deleted \(finalPhrase) after a suspension becomes final."
+        }
+        return text
+    }
 
     private var hasOpenAppeal: Bool {
         guard let appeal else { return false }
@@ -50,15 +63,15 @@ struct SuspendedView: View {
                 .font(.system(size: 56))
                 .foregroundColor(.secondary)
             if isFinal {
-                Text("Account Disabled")
+                Text("Device Disabled")
                     .font(.title2.weight(.semibold))
-                Text("This account has been disabled.")
+                Text(finalParagraph)
                     .font(.body)
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
-                // An empty anonymous account has nothing to delete; a real login
-                // (email or Apple) keeps the option (App Store 5.1.1(v)).
-                if !authManager.isAnonymous {
+                // Delete Account only while someone is signed in; a signed-out
+                // phone has nothing to delete.
+                if authManager.isAuthenticated {
                     DeleteAccountButton()
                         .font(.body)
                         .padding(.top, 8)
@@ -179,13 +192,18 @@ struct SuspendedView: View {
     }
 
     private func refreshAppeal() async {
-        if forceFinal { appealLoaded = true; return }
+        if forceFinal {
+            finalPhrase = await AppealService.deletionPhrase(final: true)
+            appealLoaded = true
+            return
+        }
         // The three questions are asked at the same time, not one after another.
         async let latest = AppealService.latest()
         async let eligible = AppealService.canAppeal()
         async let phrase = AppealService.deletionPhrase(final: false)
         appeal = await latest
         deletionPhrase = await phrase
+        finalPhrase = await AppealService.deletionPhrase(final: true)
         // nil = couldn't ask (offline): keep what we knew rather than guess.
         if let eligible = await eligible {
             canAppeal = eligible
