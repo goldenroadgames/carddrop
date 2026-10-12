@@ -32,7 +32,7 @@ Accounts are suspended after repeated reports from recipients. If you think it w
 
 ### Someone sent me a CardDrop link. What is it?
 
-It's a digital postcard. Open the link and the card opens for you to flip, read and reply to. You don't need an account or the app to view it. A card sent on the free plan stays available for at least 30 days.
+It's a digital postcard. Open the link and the card opens for you to flip, read and reply to. You don't need an account or the app to view it. A card link stays available for at least {{card_link_days}} days, and each time someone opens it, it stays available longer.
 
 ### Can I reply or react?
 

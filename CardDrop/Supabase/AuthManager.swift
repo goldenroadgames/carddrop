@@ -36,7 +36,6 @@ class AuthManager: NSObject, ObservableObject {
     @Published private(set) var repliesEnabled: Bool = true
 
     // Subscription tier
-    @Published private(set) var hasPermanentStorage: Bool = false
 
     // Send limit proximity
     @Published private(set) var nearMonthlyLimit: Bool = false
@@ -141,7 +140,6 @@ class AuthManager: NSObject, ObservableObject {
             profileState         = row.state      ?? ""
             profileZip           = row.zip        ?? ""
             profileCountry       = row.country    ?? ""
-            hasPermanentStorage  = row.tier == "unlimited"
             nearMonthlyLimit     = nearLimit
             allowMarketingUse    = row.allow_marketing_use ?? true
             repliesEnabled       = row.replies_enabled ?? true
@@ -176,11 +174,6 @@ class AuthManager: NSObject, ObservableObject {
             ]
             _ = try? await supabase.from("users").upsert(row, onConflict: "id").execute()
         }
-    }
-
-    /// Called after a successful IAP purchase to immediately reflect the upgrade in-app.
-    func setTierUnlimited() {
-        hasPermanentStorage = true
     }
 
     /// Updates only the Profile tab's name/phone/address fields (users table) —
@@ -270,7 +263,6 @@ class AuthManager: NSObject, ObservableObject {
     private func clearProfile() {
         firstName = ""; lastName = ""; profilePhone = ""; profileStreet = ""; profileCity = ""
         profileState = ""; profileZip = ""; profileCountry = ""
-        hasPermanentStorage = false
         nearMonthlyLimit = false
         allowMarketingUse = true
         repliesEnabled = true

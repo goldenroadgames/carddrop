@@ -55,23 +55,23 @@ Deno.serve(async (req) => {
     // ----------------------------------------------------------------
     const { data: userRow } = await supabase
       .from("users")
-      .select("tier, sends_this_month, sends_lifetime")
+      .select("sends_this_month, sends_lifetime")
       .eq("id", user.id)
       .maybeSingle();
 
     const sendsMonth    = userRow?.sends_this_month ?? 0;
     const sendsLifetime = userRow?.sends_lifetime   ?? 0;
-    const dbTier        = userRow?.tier             ?? "free";
 
     // ----------------------------------------------------------------
     // Determine effective tier
-    // Priority: unlimited (paid) > verified (OTP done) > unverified > anonymous
+    // Priority: verified (OTP done / Apple) > unverified > anonymous.
+    // users.tier is no longer used: there is no paid tier, and a client-writable
+    // column must never grant anything.
     // ----------------------------------------------------------------
     const isAnonymous = user.is_anonymous ?? false;
 
     let tier: string;
-    if (dbTier === "unlimited")  tier = "unlimited";
-    else if (isVerified)         tier = "verified";
+    if (isVerified)              tier = "verified";
     else if (!isAnonymous)       tier = "unverified";  // has email but not OTP verified
     else                         tier = "anonymous";
 
@@ -183,10 +183,15 @@ Deno.serve(async (req) => {
     const teaserImageUrl = `${supabaseURL}/storage/v1/object/public/card-images/${user.id}/${cardIDPath}.jpg`;
     const thumbnailUrl   = `${supabaseURL}/storage/v1/object/public/card-images/${user.id}/${cardIDPath}_thumb.jpg`;
 
-    // Unlimited tier gets permanent links; all others expire after 30 days
-    const expiresAt = tier === "unlimited"
-      ? null
-      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    // Every card link expires card_link_days (zz_config, default 90) after it is
+    // sent; each real web view pushes it out further (extend-card-link).
+    const { data: linkDaysRow } = await supabase
+      .from("zz_config")
+      .select("value")
+      .eq("key", "card_link_days")
+      .maybeSingle();
+    const linkDays = parseInt(linkDaysRow?.value ?? "", 10);
+    const expiresAt = new Date(Date.now() + (linkDays > 0 ? linkDays : 90) * 24 * 60 * 60 * 1000).toISOString();
 
     // ----------------------------------------------------------------
     // Ensure user row exists (auth user may exist before users row is created)

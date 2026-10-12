@@ -1,4 +1,5 @@
 import Foundation
+import Supabase
 
 enum LegalDocumentService {
     enum Document: String, Identifiable {
@@ -22,6 +23,22 @@ enum LegalDocumentService {
         return formatter
     }()
 
+    /// Days a card link stays live after it is sent (zz_config card_link_days).
+    /// The help text says "at least N days", so if the lookup fails this falls
+    /// back to 30 — a number that can only understate what we give.
+    private static func cardLinkDays() async -> Int {
+        struct Row: Decodable { let value: String }
+        let row = try? await supabase
+            .from("zz_config")
+            .select("value")
+            .eq("key", value: "card_link_days")
+            .single()
+            .execute()
+            .value as Row
+        if let row, let days = Int(row.value), days > 0 { return days }
+        return 30
+    }
+
     static func fetch(_ document: Document) async throws -> Fetched {
         let url = SupabaseConfig.projectURL
             .appendingPathComponent("storage/v1/object/public/legal/\(document.rawValue)")
@@ -30,8 +47,12 @@ enum LegalDocumentService {
         // stale legal text.
         let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalAndRemoteCacheData)
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let text = String(data: data, encoding: .utf8) else {
+        guard var text = String(data: data, encoding: .utf8) else {
             throw URLError(.cannotDecodeContentData)
+        }
+        // {{card_link_days}} in a legal/help file is replaced with the live setting.
+        if text.contains("{{card_link_days}}") {
+            text = text.replacingOccurrences(of: "{{card_link_days}}", with: String(await cardLinkDays()))
         }
         let lastModifiedHeader = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Last-Modified")
         let lastModified = lastModifiedHeader.flatMap { httpDateFormatter.date(from: $0) }

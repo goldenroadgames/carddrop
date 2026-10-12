@@ -88,14 +88,12 @@ enum CardUploadService {
 
         let sendsMonth    = userRow.sends_this_month ?? 0
         let sendsLifetime = userRow.sends_lifetime   ?? 0
-        let dbTier        = userRow.tier             ?? "free"
 
         let isAnonymous = user.isAnonymous
         let isVerified  = user.isSendVerified
 
         let tier: String
-        if dbTier == "unlimited"  { tier = "unlimited" }
-        else if isVerified         { tier = "verified" }
+        if isVerified              { tier = "verified" }
         else if !isAnonymous       { tier = "unverified" }
         else                       { tier = "anonymous" }
 

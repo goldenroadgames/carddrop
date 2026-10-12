@@ -9,7 +9,6 @@ struct ProfileView: View {
     @Binding var isDirty: Bool
 
     @State private var showSignOutConfirmation = false
-    @State private var showStorageUpgrade = false
     @State private var showOTPVerification = false
     @State private var showSignInGate = false
     @State private var showRepliesOffChoice = false
@@ -53,9 +52,6 @@ struct ProfileView: View {
                     nicknameSection
                     profileSection
                     mailingAddressesSection
-                    if authManager.isEmailVerified {
-                        storageSection
-                    }
                 }
 
                 Section {
@@ -204,11 +200,6 @@ struct ProfileView: View {
                     .environmentObject(draftManager)
                     .environmentObject(addressBook)
             }
-            .sheet(isPresented: $showStorageUpgrade) {
-                StorageUpgradeView {
-                    authManager.setTierUnlimited()
-                }
-            }
         }
         .sheet(isPresented: $showSignInGate) {
             SubscribeGateView(onSuccess: { showSignInGate = false })
@@ -339,51 +330,6 @@ struct ProfileView: View {
                 .foregroundColor(.red)
             }
             .textCase(.none)
-        }
-    }
-
-    // MARK: - Storage section
-
-    @ViewBuilder
-    private var storageSection: some View {
-        Section {
-            if authManager.hasPermanentStorage {
-                HStack {
-                    Image(systemName: "archivebox.fill")
-                        .foregroundColor(.purple)
-                    Text("Permanent Storage")
-                    Spacer()
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundColor(.green)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Free tier — cards expire after 30 days")
-                        .font(.subheadline)
-                    Text("Upgrade once to keep your cards live indefinitely.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.vertical, 2)
-
-                Button(action: { showStorageUpgrade = true }) {
-                    HStack {
-                        Image(systemName: "archivebox.fill")
-                            .foregroundColor(.purple)
-                        Text("Unlock Permanent Storage — $9.99")
-                            .font(.system(size: 17, weight: .semibold))
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .foregroundColor(.primary)
-            }
-        } header: {
-            Text("Card Storage")
-                .font(.system(size: 13, weight: .regular))
-                .textCase(.none)
         }
     }
 }

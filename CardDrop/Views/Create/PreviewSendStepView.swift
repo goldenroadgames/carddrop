@@ -54,7 +54,6 @@ struct SendOptionsView: View {
     @State private var showSendErrorAlert = false
     @State private var hasSent = false
     @State private var showMissingPhotoAlert = false
-    @State private var showStorageUpgrade = false
     @State private var showCreateAccount = false
     @State private var showVerifyEmail = false
     @State private var limitPrompt: LimitPrompt? = nil
@@ -348,11 +347,6 @@ struct SendOptionsView: View {
                 performTextSend(entries: entries)
             }
         }
-        .sheet(isPresented: $showStorageUpgrade) {
-            StorageUpgradeView {
-                authManager.setTierUnlimited()
-            }
-        }
         .sheet(isPresented: $showVerifyEmailForMail) {
             OTPVerificationView(
                 onSuccess: {
@@ -511,19 +505,6 @@ struct SendOptionsView: View {
                 .background(Color(uiColor: .secondarySystemGroupedBackground))
                 .cornerRadius(16)
                 .padding(.horizontal, 16)
-
-                if !authManager.hasPermanentStorage && !authManager.isAnonymous && authManager.isEmailVerified {
-                    sendRow(
-                        icon: "archivebox",
-                        title: "Cards expire after 30 days",
-                        subtitle: "Upgrade once for permanent storage — $9.99",
-                        color: .purple
-                    ) { showStorageUpgrade = true }
-                    .padding(.horizontal, 16)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground))
-                    .cornerRadius(16)
-                    .padding(.horizontal, 16)
-                }
 
                 // Finish button — disabled while a postcard order is still being
                 // submitted to LOB, so the user can't dismiss (and lose track of
