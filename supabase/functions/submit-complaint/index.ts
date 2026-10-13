@@ -313,7 +313,8 @@ async function writeBlocks(
   }
 }
 
-// In-app notice for everyone, email too when the account has an address.
+// In-app notice only: the sender learns about a report from the app, never by
+// email. (Emails in this function go to the owner, not to users.)
 async function notifySender(
   supabase: ReturnType<typeof createClient>,
   senderID: string | null,
@@ -322,16 +323,6 @@ async function notifySender(
 ) {
   if (!senderID) return;
   await supabase.from("user_notices").insert({ user_id: senderID, kind, message });
-
-  const { data } = await supabase.auth.admin.getUserById(senderID);
-  const email = data?.user?.email;
-  if (email) {
-    await sendEmail(
-      email,
-      kind === "ban" ? "Your CardDrop account has been suspended" : "A card you sent was reported",
-      `${message}\n\n— CardDrop`,
-    );
-  }
 }
 
 function json(body: unknown, status = 200): Response {

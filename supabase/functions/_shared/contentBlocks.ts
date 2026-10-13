@@ -15,7 +15,8 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 // content_block_limit_24h / _30d, then to the defaults below. Reaching either
 // limit of EITHER kind suspends the account and the device (same path as
 // repeated recipient complaints: ban_account + user_devices.banned; the admin
-// page can reinstate). Warnings start three blocks before a limit ("warn", also two before), but not before 2 strikes in that window, then
+// page can reinstate). Counting starts at the later of the window start and the
+// account's latest reinstatement (account_bans.reinstated_at). Warnings start three blocks before a limit ("warn", also two before), but not before 2 strikes in that window, then
 // one before ("final"), worked out per kind; the more severe one is returned.
 export type BlockOutcome = { suspended: boolean; warning: "none" | "warn" | "final" };
 
@@ -92,8 +93,22 @@ export async function recordContentBlock(
       limit30: pick(`content_block_limit_${kind}_30d`, "content_block_limit_30d") ?? DEFAULT_LIMIT_30D,
     });
 
+    // Strikes count from the later of the normal window start and the account's
+    // latest reinstatement, so a reinstated person starts again from zero (and
+    // gets the warnings again) instead of sitting at the limit. The block rows
+    // stay as history. Never reinstated = no floor.
+    const { data: reinstated } = await supabase
+      .from("account_bans")
+      .select("reinstated_at")
+      .eq("user_id", input.userId)
+      .not("reinstated_at", "is", null)
+      .order("reinstated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const reinstatedMs = reinstated?.reinstated_at ? new Date(reinstated.reinstated_at).getTime() : 0;
+
     const count = async (kind: Kind, hours: number): Promise<number> => {
-      const since = new Date(Date.now() - hours * 3600_000).toISOString();
+      const since = new Date(Math.max(Date.now() - hours * 3600_000, reinstatedMs)).toISOString();
       const { count: n } = await supabase
         .from("content_blocks")
         .select("id", { count: "exact", head: true })
