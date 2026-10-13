@@ -158,11 +158,15 @@ Deno.serve(async (req) => {
     const { data: cfgRows } = await supabase
       .from("zz_config")
       .select("key, value")
-      .in("key", ["complaint_strikes_to_ban", "complaint_window_days"]);
+      .in("key", ["complaint_strikes_to_ban", "complaint_window_days", "complaint_rapid_final_hours"]);
     const cfg: Record<string, number> = {};
     for (const r of cfgRows ?? []) cfg[r.key] = parseInt(r.value, 10);
     const threshold = cfg["complaint_strikes_to_ban"] || 3;
     const windowDays = cfg["complaint_window_days"] || 180;
+    // Rapid strike-out: the 3 counted reports within this many hours = final (0 = off).
+    const rapidHours = Number.isNaN(cfg["complaint_rapid_final_hours"]) || cfg["complaint_rapid_final_hours"] === undefined
+      ? 72
+      : cfg["complaint_rapid_final_hours"];
     const since = new Date(Date.now() - windowDays * 86400000).toISOString();
 
     const byAccount = card.sender_id ? await countComplaints(supabase, "sender_id", card.sender_id, since) : 0;
@@ -191,6 +195,29 @@ Deno.serve(async (req) => {
             ban_reason: banReason,
           },
           { onConflict: "device_uuid" },
+        );
+      }
+      // The three reports that did it all landed within rapidHours: make it final.
+      const hitColumn: "sender_id" | "device_uuid" = byAccount >= threshold ? "sender_id" : "device_uuid";
+      const hitValue = hitColumn === "sender_id" ? card.sender_id : card.device_uuid;
+      if (rapidHours > 0 && hitValue && await withinHours(supabase, hitColumn, hitValue, since, threshold, rapidHours)) {
+        const finalReason = `${threshold} reported cards within ${rapidHours} hours`;
+        if (card.sender_id) {
+          await supabase
+            .from("account_bans")
+            .update({ final: true, final_reason: finalReason })
+            .eq("user_id", card.sender_id)
+            .is("reinstated_at", null);
+          await supabase.from("user_devices").update({ permanent: true }).eq("user_id", card.sender_id);
+        }
+        if (card.device_uuid) {
+          await supabase.from("user_devices").update({ permanent: true }).eq("device_uuid", card.device_uuid);
+        }
+        await sendEmail(
+          Deno.env.get("ADMIN_ALERT_EMAIL") ?? "support@carddropapp.com",
+          "CardDrop: account suspended as FINAL (rapid strike-out)",
+          `${finalReason}. The account (${card.sender_id ?? "no account"}) was suspended as final, with no appeal. ` +
+            "You can still reinstate it from the Suspended Accounts page.\n\nReview it: https://carddropapp.com/grg_admin/suspended?seg=final",
         );
       }
       await notifySender(supabase, card.sender_id, "ban",
@@ -350,4 +377,29 @@ async function secureFiles(supabase: ReturnType<typeof createClient>, cardID: st
     "CardDrop: could not move a reported card's files to private storage",
     `Card ${cardID} is hidden, but moving its image files to private storage failed:\n${err}\n\nThe nightly sweep will retry.`,
   );
+}
+
+
+// True when the most recent `count` standing (not cleared) reports for this
+// account or device, inside the report window, all fall within `hours` of each
+// other. Needs `count` reports; fewer returns false.
+async function withinHours(
+  supabase: ReturnType<typeof createClient>,
+  column: "sender_id" | "device_uuid",
+  value: string,
+  since: string,
+  count: number,
+  hours: number,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("card_complaints")
+    .select("created_at")
+    .eq(column, value)
+    .is("cleared_at", null)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(count);
+  const times = (data ?? []).map((r: { created_at: string }) => Date.parse(r.created_at));
+  if (times.length < count) return false;
+  return Math.max(...times) - Math.min(...times) <= hours * 3600_000;
 }
