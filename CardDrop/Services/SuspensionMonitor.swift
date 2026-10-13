@@ -66,6 +66,11 @@ final class SuspensionMonitor: ObservableObject {
             UserDefaults.standard.set(suspended, forKey: Self.lastKnownKey)
             if !suspended { setKnownFinal(false) }
             lastCheck = Date()
+            // Signed in too: the remembered "this phone is permanently disabled"
+            // answer is only ever cleared by the server's answer, so ask it here
+            // as well (it used to be asked only when signed out, which left a
+            // stale flag stuck on the Account Disabled screen).
+            await recheckDevice()
         } else if supabase.auth.currentSession == nil {
             // Signed out (e.g. the account was deleted): nothing to be suspended
             // as, and a stale "suspended" must not follow the phone around.

@@ -80,6 +80,7 @@ Deno.serve(async (req) => {
           (minor === "yes" || minor === "not_sure" ? "URGENT (child involved?) — " : "") + "CardDrop: dismissed report reopened",
           `A card whose report you dismissed (${card.id}) was reported again.\n\nReview it: https://carddropapp.com/grg_admin/reported-cards`,
         );
+        if (minor === "yes" || minor === "not_sure") await holdForChild(supabase, card.id, card.sender_id);
       }
       // A later report can only raise the child answer (yes > not sure > no),
       // and a raise to yes / not sure sends the owner an urgent email.
@@ -88,7 +89,10 @@ Deno.serve(async (req) => {
           .from("card_complaints")
           .update({ involves_minor: minor, ...(minor !== "no" && contactRaw ? { reporter_contact: contactRaw } : {}) })
           .eq("id", existing.id);
-        if (minor !== "no") await sendMinorAlert(card.id, minor);
+        if (minor !== "no") {
+          await holdForChild(supabase, card.id, card.sender_id);
+          await sendMinorAlert(card.id, minor);
+        }
       }
       // Make sure the card is hidden even if this complaint predates the
       // reported_at column (idempotent: only stamps when still null).
@@ -135,6 +139,10 @@ Deno.serve(async (req) => {
       .update({ reported_at: new Date().toISOString() })
       .eq("id", card.id)
       .is("reported_at", null);
+
+    // A report that says a child is (or may be) involved puts the card on
+    // legal hold straight away, so it can never be deleted before review.
+    if (minor === "yes" || minor === "not_sure") await holdForChild(supabase, card.id, card.sender_id);
 
     if (mailed) {
       await writeBlocks(supabase, orders ?? [], card.sender_id);
@@ -231,6 +239,34 @@ async function countChildFlagged(
     .in("involves_minor", ["yes", "not_sure"])
     .gte("created_at", since);
   return count ?? 0;
+}
+
+// Legal hold on the card (cards.legal_hold: the sweeper, the sender and account
+// deletion all leave it alone). Only stamps a card that is not already held, and
+// writes a 'hold' line to card_view_log. An admin can still release it.
+async function holdForChild(
+  supabase: ReturnType<typeof createClient>,
+  cardID: string,
+  senderID: string | null,
+) {
+  const { data: held, error } = await supabase
+    .from("cards")
+    .update({ legal_hold: true, legal_hold_at: new Date().toISOString() })
+    .eq("id", cardID)
+    .eq("legal_hold", false)
+    .select("id");
+  if (error) {
+    console.error("child-report legal hold error:", error);
+    return;
+  }
+  if ((held ?? []).length === 0) return;
+  await supabase.from("card_view_log").insert({
+    card_id: cardID,
+    sender_id: senderID,
+    event: "hold",
+    reason: "Automatic: report says a child may be involved",
+    viewed_by: "system",
+  });
 }
 
 async function sendMinorAlert(cardID: string, minor: Minor) {
