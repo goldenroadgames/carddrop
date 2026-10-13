@@ -31,6 +31,7 @@ enum LegalDocumentService {
         "suspension_delete_days": 180,
         "final_suspension_delete_days": 30,
         "retention_days": 365,
+        "history_retention_days": 730,
     ]
 
     private static func fillPlaceholders(in text: String) async -> String {

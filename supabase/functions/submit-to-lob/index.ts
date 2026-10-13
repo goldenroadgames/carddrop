@@ -73,6 +73,18 @@ Deno.serve(async (req) => {
       return json({ error: "order_not_paid", status: order.status }, 400);
     }
 
+    // A reported card, or one on legal hold, keeps its pictures private and is
+    // offline: don't publish its print files for LOB. Release the payment hold.
+    const { data: orderCard } = await supabase
+      .from("cards")
+      .select("reported_at, legal_hold")
+      .eq("id", order.card_id)
+      .maybeSingle();
+    if (orderCard?.reported_at || orderCard?.legal_hold) {
+      await releaseHold(supabase, order, "Card unavailable (reported or on legal hold)");
+      return json({ error: "card_unavailable" }, 403);
+    }
+
     // ----------------------------------------------------------------
     // Sanity-check the image URLs point at this order's own card in our
     // own public bucket — the client supplies them (rendering can only

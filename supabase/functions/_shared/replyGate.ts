@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
 // Shared by submit-reply and submit-reaction: may a web visitor add a reply or
-// reaction to this card right now? Not if the card is deleted, reported, owned
+// reaction to this card right now? Not if the card is deleted, reported, on legal hold, owned
 // by a suspended account, or the sender has switched replies off (on the card
 // or in their profile; the profile switch overrides the card).
 export type ReplyGate =
@@ -14,10 +14,10 @@ export async function checkCardAcceptsReplies(
 ): Promise<ReplyGate> {
   const { data: card } = await supabase
     .from("cards")
-    .select("id, sender_id, deleted_at, reported_at, replies_enabled")
+    .select("id, sender_id, deleted_at, reported_at, legal_hold, replies_enabled")
     .eq("id", cardID)
     .maybeSingle();
-  if (!card || card.deleted_at || card.reported_at) return { ok: false, error: "unavailable" };
+  if (!card || card.deleted_at || card.reported_at || card.legal_hold) return { ok: false, error: "unavailable" };
 
   if (card.sender_id) {
     const { data: ban } = await supabase

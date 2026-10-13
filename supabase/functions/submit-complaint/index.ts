@@ -1,6 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { addressHash } from "../_shared/addressKey.ts";
 import { sendEmail } from "../_shared/resend.ts";
+import { syncCardFiles } from "../_shared/cardFiles.ts";
 
 // Called from the public /card/[id]/report web page (anon key, no login).
 // Records a complaint against a card and its sender, blocks the sender from
@@ -101,6 +102,7 @@ Deno.serve(async (req) => {
         .update({ reported_at: new Date().toISOString() })
         .eq("id", card.id)
         .is("reported_at", null);
+      await secureFiles(supabase, card.id);
       if (blockAll && !existing.block_all && mailed) {
         await supabase.from("card_complaints").update({ block_all: true }).eq("id", existing.id);
         await writeBlocks(supabase, orders ?? [], null);
@@ -143,6 +145,9 @@ Deno.serve(async (req) => {
     // A report that says a child is (or may be) involved puts the card on
     // legal hold straight away, so it can never be deleted before review.
     if (minor === "yes" || minor === "not_sure") await holdForChild(supabase, card.id, card.sender_id);
+
+    // The card is hidden now; move its image files out of public storage too.
+    await secureFiles(supabase, card.id);
 
     if (mailed) {
       await writeBlocks(supabase, orders ?? [], card.sender_id);
@@ -330,4 +335,19 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json", ...CORS },
   });
+}
+
+
+// Move the reported card's files to private storage. A failure is logged and
+// the owner is emailed; the card stays hidden regardless, and the nightly sweep
+// retries every reported or held card whose files are still public.
+async function secureFiles(supabase: ReturnType<typeof createClient>, cardID: string) {
+  const err = await syncCardFiles(supabase, cardID);
+  if (!err) return;
+  console.error("secure files failed:", cardID, err);
+  await sendEmail(
+    Deno.env.get("ADMIN_ALERT_EMAIL") ?? "support@carddropapp.com",
+    "CardDrop: could not move a reported card's files to private storage",
+    `Card ${cardID} is hidden, but moving its image files to private storage failed:\n${err}\n\nThe nightly sweep will retry.`,
+  );
 }

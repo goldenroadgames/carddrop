@@ -2,6 +2,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { purgeCard } from "../_shared/purgeCard.ts";
 import { deleteCard } from "../_shared/deleteCard.ts";
 import { deleteAccountData } from "../_shared/deleteAccount.ts";
+import { secureCardFiles } from "../_shared/cardFiles.ts";
 
 // Scheduled job: finishes deletes that failed partway (deleted_at set,
 // purged_at null) and runs the 12-month retention scrubs. Called by Supabase
@@ -119,7 +120,17 @@ Deno.serve(async (req) => {
     // "Delete data now" requests from the admin page.
     const deleteRequests = await sweepDeleteRequests(supabase);
 
-    return json({ staging, purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions, deleteRequests });
+    // Ended history (review log, report records, reinstated suspensions and
+    // their resolved appeals) after history_retention_days, unless held or the
+    // sender is still suspended.
+    const history = await sweepHistory(supabase);
+
+    // Self-healing: any reported or held card whose image files are still in
+    // the public bucket (a move that failed, or a card from before the move
+    // existed) is moved to private storage now.
+    const secured = await sweepHeldFiles(supabase);
+
+    return json({ staging, purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions, deleteRequests, history, secured });
   } catch (err) {
     console.error("sweep-deleted-cards error:", err);
     return json({ error: "Internal server error" }, 500);
@@ -365,4 +376,123 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+
+// "Keep a record while it is still doing a job, otherwise delete it
+// history_retention_days (default 730) after its last activity." Still doing a
+// job: the card is on legal hold, the sender has an active suspension or an
+// account hold, or the decision is "CSAM review required". Chosen in JS from
+// short selects (not long filter strings) so empty lists and null columns
+// can't silently keep or delete the wrong rows.
+// deno-lint-ignore no-explicit-any
+async function sweepHistory(supabase: any): Promise<Record<string, number | string>> {
+  const { data: cfg } = await supabase
+    .from("zz_config")
+    .select("value")
+    .eq("key", "history_retention_days")
+    .maybeSingle();
+  const days = parseInt(cfg?.value ?? "", 10);
+  const cutoff = new Date(Date.now() - (days > 0 ? days : 730) * 86400000).toISOString();
+
+  const { data: heldCards } = await supabase.from("cards").select("id").eq("legal_hold", true);
+  const keepCards = new Set<string>((heldCards ?? []).map((c: { id: string }) => c.id));
+  const { data: keepBans } = await supabase
+    .from("account_bans")
+    .select("user_id, reinstated_at, legal_hold")
+    .or("reinstated_at.is.null,legal_hold.eq.true");
+  const keepAccounts = new Set<string>(
+    (keepBans ?? []).map((b: { user_id: string | null }) => b.user_id).filter(Boolean) as string[],
+  );
+
+  const result: Record<string, number | string> = {};
+  const removeIds = async (table: string, ids: string[]) => {
+    for (let i = 0; i < ids.length; i += 100) {
+      const { error } = await supabase.from(table).delete().in("id", ids.slice(i, i + 100));
+      if (error) {
+        console.error("sweep history error:", table, error.message);
+        return error.message as string;
+      }
+    }
+    return null;
+  };
+
+  // Review log on cards.
+  const { data: logRows } = await supabase
+    .from("card_view_log")
+    .select("id, card_id, sender_id, event, reason")
+    .lt("created_at", cutoff)
+    .limit(1000);
+  // Recorded NCMEC / law-enforcement actions are never deleted (keep in step
+  // with HOLD_ACTIONS in web/app/grg_admin/lib/actionTypes.ts).
+  const PERMANENT_ACTIONS = new Set(["NCMEC report filed", "Law enforcement contacted"]);
+  const logIds = (logRows ?? [])
+    .filter((r: { card_id: string; sender_id: string | null; event: string; reason: string | null }) =>
+      r.event !== "child_confirmed" &&
+      !(r.event === "action" && r.reason && PERMANENT_ACTIONS.has(r.reason)) &&
+      !keepCards.has(r.card_id) && !(r.sender_id && keepAccounts.has(r.sender_id)))
+    .map((r: { id: string }) => r.id);
+  result.card_view_log = (await removeIds("card_view_log", logIds)) ?? logIds.length;
+
+  // Report records.
+  const { data: complaintRows } = await supabase
+    .from("card_complaints")
+    .select("id, card_id, sender_id, decision")
+    .lt("created_at", cutoff)
+    .limit(1000);
+  const complaintIds = (complaintRows ?? [])
+    .filter((r: { card_id: string; sender_id: string | null; decision: string | null }) =>
+      r.decision !== "child_confirmed" && !keepCards.has(r.card_id) && !(r.sender_id && keepAccounts.has(r.sender_id)))
+    .map((r: { id: string }) => r.id);
+  result.card_complaints = (await removeIds("card_complaints", complaintIds)) ?? complaintIds.length;
+
+  // Reinstated suspensions (an active, final or held one is never touched).
+  const { data: endedBans } = await supabase
+    .from("account_bans")
+    .select("id, user_id, legal_hold")
+    .not("reinstated_at", "is", null)
+    .lt("reinstated_at", cutoff)
+    .limit(1000);
+  const banIds = (endedBans ?? [])
+    .filter((b: { user_id: string | null; legal_hold: boolean }) => !b.legal_hold && !(b.user_id && keepAccounts.has(b.user_id)))
+    .map((b: { id: string }) => b.id);
+  result.account_bans = (await removeIds("account_bans", banIds)) ?? banIds.length;
+
+  // Resolved appeals of accounts that are not suspended now.
+  const { data: oldAppeals } = await supabase
+    .from("ban_reviews")
+    .select("id, user_id")
+    .not("resolved_at", "is", null)
+    .lt("resolved_at", cutoff)
+    .limit(1000);
+  const appealIds = (oldAppeals ?? [])
+    .filter((a: { user_id: string | null }) => !(a.user_id && keepAccounts.has(a.user_id)))
+    .map((a: { id: string }) => a.id);
+  result.ban_reviews = (await removeIds("ban_reviews", appealIds)) ?? appealIds.length;
+
+  return result;
+}
+
+
+// Reported or legal-hold cards keep their image files in private storage.
+// secureCardFiles does nothing for a card whose files are already there, so
+// this is cheap to run every night over every such card.
+// deno-lint-ignore no-explicit-any
+async function sweepHeldFiles(supabase: any): Promise<{ checked: number; failed: number }> {
+  const { data: cards } = await supabase
+    .from("cards")
+    .select("id, sender_id")
+    .is("deleted_at", null)
+    .not("sender_id", "is", null)
+    .or("reported_at.not.is.null,legal_hold.eq.true")
+    .limit(500);
+  let failed = 0;
+  for (const card of cards ?? []) {
+    const err = await secureCardFiles(supabase, card.id, card.sender_id);
+    if (err) {
+      failed++;
+      console.error("sweep secure files error:", card.id, err);
+    }
+  }
+  return { checked: (cards ?? []).length, failed };
 }

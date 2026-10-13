@@ -140,10 +140,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    // This call's row in send_events, so its outcome ("sent" / "refused") can be
-    // recorded below. Null if the cap is skipped or the insert failed.
-    let sendEventId: string | null = null;
-
     // ----------------------------------------------------------------
     // Send-rate cap: send-card calls per hour / per day, counted from
     // send_events (server-written, no foreign key to cards, so resending a
@@ -185,12 +181,7 @@ Deno.serve(async (req) => {
           return json({ error: "rate_limited", window: "day" }, 429);
         }
       }
-      const { data: sendEvent } = await supabase
-        .from("send_events")
-        .insert({ user_id: user.id, device_uuid: deviceUUID, card_id: cardID })
-        .select("id")
-        .single();
-      sendEventId = sendEvent?.id ?? null;
+      await supabase.from("send_events").insert({ user_id: user.id, device_uuid: deviceUUID, card_id: cardID });
     }
 
     // ----------------------------------------------------------------
@@ -221,7 +212,6 @@ Deno.serve(async (req) => {
       if (result.status === "missing") return json({ error: "images_missing", names: result.names }, 400);
       if (result.status === "flagged") {
         const verdict = result.verdict;
-        if (sendEventId) await supabase.from("send_events").update({ outcome: "refused" }).eq("id", sendEventId);
         await removeFolder(supabase, "card-images", user.id, cardPath);
         // Record the block and apply the strike rules (every flagged block counts;
         // see _shared/contentBlocks.ts).
@@ -351,8 +341,6 @@ Deno.serve(async (req) => {
     const usedLifetime = deviceCapped ? Math.max(sendsLifetime, deviceLifetime) : sendsLifetime;
     const remainingMonthly  = monthlyLimit  === -1 ? -1 : monthlyLimit  - usedMonth    - 1;
     const remainingLifetime = lifetimeLimit === -1 ? -1 : lifetimeLimit - usedLifetime - 1;
-
-    if (sendEventId) await supabase.from("send_events").update({ outcome: "sent" }).eq("id", sendEventId);
 
     return json({
       cardURL:                cardWebUrl,
