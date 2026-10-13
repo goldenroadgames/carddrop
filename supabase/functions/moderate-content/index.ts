@@ -9,7 +9,7 @@ import { recordContentBlock } from "../_shared/contentBlocks.ts";
 //
 // Body: { texts?: string[], image?: string, deviceUUID?: string }  (image = base64 JPEG)
 // Reply: { status: "clean" } |
-//        { status: "flagged", categories, warning: "none"|"warn"|"final", suspended }
+//        { status: "flagged", categories, flaggedTexts: [{ index, categories }], warning: "none"|"warn"|"final", suspended }
 // If the check can't run: HTTP 503 { error: "try_later" }. The app treats that
 // as "can't check right now" and blocks the step with a "try again" message;
 // send-card also re-checks everything it receives before a card is stored, and
@@ -52,20 +52,23 @@ Deno.serve(async (req) => {
     const verdict = await moderateContent(supabase, { texts, images });
     if (verdict.status === "error") return json({ error: "try_later" }, 503);
     if (verdict.status === "flagged") {
-      // Record the block and apply the strike rules (blocked photos and
-      // harassment count; see _shared/contentBlocks.ts).
+      // Record the block and apply the strike rules (every flagged block counts;
+      // see _shared/contentBlocks.ts).
       const outcome = await recordContentBlock(supabase, {
         userId: user.id,
         deviceUUID: typeof body.deviceUUID === "string" ? body.deviceUUID : null,
-        photo: verdict.photo,
-        text: verdict.text,
-        categories: verdict.categories,
-        fingerprints: verdict.fingerprints,
-        scores: verdict.scores,
+        parts: verdict.parts,
+      });
+      // Which of the strings the app sent were flagged (their positions in
+      // `texts`) and for what, so the app can name the field.
+      const flaggedTexts = texts.flatMap((t, index) => {
+        const f = verdict.textFlags.find((x) => x.text === t.trim());
+        return f ? [{ index, categories: f.categories }] : [];
       });
       return json({
         status: "flagged",
         categories: verdict.categories,
+        flaggedTexts,
         warning: outcome.warning,
         suspended: outcome.suspended,
       });

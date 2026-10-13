@@ -7,8 +7,10 @@ struct InvisibleInkStepView: View {
 
     @State private var isModerating = false
     @State private var showBlockAlert = false
+    @State private var showQRTextAlert = false
     @State private var flaggedCategories: [String] = []
     @State private var flaggedWarning: String? = nil
+    @State private var flaggedFields: [FlaggedField] = []
     @State private var showUnavailableAlert = false
     @FocusState private var textFocused: Bool
 
@@ -103,16 +105,21 @@ struct InvisibleInkStepView: View {
                     onNext()
                     return
                 }
+                if QRTextRules.isNotPlainText(draft.backMessageQRContent) {
+                    showQRTextAlert = true
+                    return
+                }
                 Task {
                     isModerating = true
-                    let result = await ModerationService.check(texts: [draft.backMessageQRContent])
+                    let result = await ModerationService.check(items: [(label: "The back message", text: draft.backMessageQRContent)])
                     isModerating = false
                     switch result {
                     case .clean:
                         onNext()
-                    case .flagged(let categories, let warning):
+                    case .flagged(let categories, let warning, let fields):
                         flaggedCategories = categories
                         flaggedWarning = warning
+                        flaggedFields = fields
                         showBlockAlert = true
                     case .unavailable:
                         showUnavailableAlert = true
@@ -142,7 +149,14 @@ struct InvisibleInkStepView: View {
         .alert("Content Not Allowed", isPresented: $showBlockAlert) {
             Button("Edit Message", role: .cancel) { }
         } message: {
-            Text("Your hidden message was flagged for: \(flaggedCategories.joined(separator: ", ")). Please revise before continuing." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
+            Text(ModerationService.alertMessage(
+                categories: flaggedCategories, fields: flaggedFields, warning: flaggedWarning,
+                fallback: "Your hidden message may contain \(ModerationService.joinedCategories(flaggedCategories)). Please review it before continuing."))
+        }
+        .alert("Plain Text Only", isPresented: $showQRTextAlert) {
+            Button("Edit Message", role: .cancel) { }
+        } message: {
+            Text(QRTextRules.message)
         }
         .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
             Button("OK", role: .cancel) { }

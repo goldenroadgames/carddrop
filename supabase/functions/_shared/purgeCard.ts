@@ -30,14 +30,6 @@ export async function purgeCard(
     if (error) return `${table}: ${error.message}`;
   }
 
-  // Reply photos live in reply-photos/{cardId}/..., where cardId is whatever
-  // case the link used (send-card builds the link from the app's uppercase
-  // UUID), so try both.
-  for (const folder of new Set([id, id.toUpperCase()])) {
-    const err = await removeFolder(supabase, "reply-photos", folder, undefined);
-    if (err) return err;
-  }
-
   // Card images: no wildcard in the Storage API, so list the sender's folder
   // by cardID prefix and remove everything returned. Catches every variant
   // (_back, _thumb, _full, _before*, _front_forLOB_*, _back_forLOB_* ...).

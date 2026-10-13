@@ -3,11 +3,11 @@ import { checkCardAcceptsReplies } from "../_shared/replyGate.ts";
 import { moderateContent } from "../_shared/moderation.ts";
 
 // Called from the public card reply forms (anon key, no login).
-// multipart/form-data: cardID, text (optional), photo (optional JPEG, already
-// resized by the page). Order: validate -> per-IP rate limit -> card still
-// live -> OpenAI moderation of text and photo -> store the photo -> insert the
-// reply. If OpenAI can't be reached the reply is rejected (fail closed).
-// The photo is only written to storage after it passes moderation.
+// multipart/form-data: cardID, text. Replies are text only: a request that
+// carries a photo is refused, because a web visitor can't be tied to who sent
+// it. Order: validate -> per-IP rate limit -> card still live -> OpenAI
+// moderation of the text -> insert the reply. If OpenAI can't be reached the
+// reply is rejected (fail closed).
 //
 // Errors are {error: code}: invalid | unavailable | replies_off | rate_limited |
 // rejected | try_later. The page maps each code to a visitor-facing message.
@@ -15,7 +15,6 @@ import { moderateContent } from "../_shared/moderation.ts";
 // Needs the OPENAI_API_KEY secret (supabase secrets set OPENAI_API_KEY=...).
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const MAX_TEXT_CHARS = 2000;
 const DEFAULT_ATTEMPTS_PER_HOUR = 10;
 
@@ -45,19 +44,9 @@ Deno.serve(async (req) => {
     }
     const cardID = String(form.get("cardID") ?? "").toLowerCase();
     const text = String(form.get("text") ?? "").trim().slice(0, MAX_TEXT_CHARS);
-    const photoField = form.get("photo");
-    const photo = photoField instanceof File && photoField.size > 0 ? photoField : null;
-    if (!UUID_RE.test(cardID) || (!text && !photo)) return json({ error: "invalid" }, 400);
-
-    let photoBytes: Uint8Array | null = null;
-    if (photo) {
-      if (photo.size > MAX_PHOTO_BYTES) return json({ error: "invalid" }, 400);
-      photoBytes = new Uint8Array(await photo.arrayBuffer());
-      // JPEG magic bytes (FF D8 FF): the page always sends a re-encoded JPEG.
-      if (photoBytes[0] !== 0xff || photoBytes[1] !== 0xd8 || photoBytes[2] !== 0xff) {
-        return json({ error: "invalid" }, 400);
-      }
-    }
+    // No photos: refuse any request that carries one.
+    if (form.get("photo") !== null) return json({ error: "invalid" }, 400);
+    if (!UUID_RE.test(cardID) || !text) return json({ error: "invalid" }, 400);
 
     // ---------------- per-IP rate limit ----------------
     const ipHash = await hashIp(req);
@@ -91,36 +80,17 @@ Deno.serve(async (req) => {
     const card = gate.card;
 
     // ---------------- moderation (fail closed) ----------------
-    const verdict = await moderateContent(supabase, {
-      texts: text ? [text] : [],
-      images: photoBytes ? [photoBytes] : [],
-    });
+    const verdict = await moderateContent(supabase, { texts: [text] });
     if (verdict.status === "error") return json({ error: "try_later" }, 503);
     if (verdict.status === "flagged") return json({ error: "rejected" }, 422);
 
-    // ---------------- store photo, insert reply ----------------
-    let imageUrl: string | null = null;
-    let uploadedPath: string | null = null;
-    if (photoBytes) {
-      uploadedPath = `${card.id}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.jpg`;
-      const { error: uploadError } = await supabase.storage
-        .from("reply-photos")
-        .upload(uploadedPath, photoBytes, { contentType: "image/jpeg" });
-      if (uploadError) {
-        console.error("reply photo upload error:", uploadError);
-        return json({ error: "try_later" }, 500);
-      }
-      imageUrl = supabase.storage.from("reply-photos").getPublicUrl(uploadedPath).data.publicUrl;
-    }
-
+    // ---------------- insert reply ----------------
     const { error: insertError } = await supabase.from("replies").insert({
       card_id: card.id,
-      reply_text: text || null,
-      reply_image_url: imageUrl,
+      reply_text: text,
     });
     if (insertError) {
       console.error("reply insert error:", insertError.code, insertError.message);
-      if (uploadedPath) await supabase.storage.from("reply-photos").remove([uploadedPath]);
       return json({ error: "try_later" }, 500);
     }
 

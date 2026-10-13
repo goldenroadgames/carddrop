@@ -113,3 +113,15 @@ async function listNames(
   }
   return out;
 }
+
+// Which part of the card a staged image key is: the finished front, the finished
+// back, or the person's original photo. Keys look like {userId}/{cardId}{suffix}.jpg
+// (a card id is a 36-character UUID with no underscore).
+export function imageRole(key: string): "front" | "back" | "original" | "other" {
+  const name = (key.split("/").pop() ?? "").replace(/\.jpg$/i, "");
+  const suffix = name.slice(36);
+  if (suffix === "" || suffix === "_thumb" || suffix.startsWith("_front_forLOB")) return "front";
+  if (suffix === "_back" || suffix === "_back6x9" || suffix.startsWith("_back_forLOB")) return "back";
+  if (suffix === "_before" || suffix === "_before_thumb") return "original";
+  return "other";
+}

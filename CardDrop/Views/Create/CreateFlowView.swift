@@ -29,6 +29,7 @@ struct CreateFlowView: View {
     @State private var isModerating = false
     @State private var moderationFlagged: [String] = []
     @State private var flaggedWarning: String? = nil
+    @State private var flaggedFields: [FlaggedField] = []
     @State private var showHardBlockAlert = false
     @State private var showUnavailableAlert = false
     // Mirrored from SendOptionsView's isSubmittingToLOB — blocks the
@@ -159,7 +160,9 @@ struct CreateFlowView: View {
                 Button("Edit Back") { currentStep = 2 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Your photo or text was flagged for: \(moderationFlagged.joined(separator: ", ")). Please check your photo, message, captions, greetings and names, then try again." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
+                Text(ModerationService.alertMessage(
+                    categories: moderationFlagged, fields: flaggedFields, warning: flaggedWarning,
+                    fallback: "Your photo or text may contain \(ModerationService.joinedCategories(moderationFlagged)). Please review your photo, message, captions, greetings and names, then try again."))
             }
             .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
                 Button("OK", role: .cancel) {}
@@ -277,12 +280,6 @@ struct CreateFlowView: View {
 
     // MARK: - Moderation
 
-    // All user-typed text on the card (message, ink/QR text, captions,
-    // greetings banner, nicknames, border text) — see PostcardDraft.userTypedTexts.
-    private var messageTextsFromDraft: [String] {
-        draft.userTypedTexts
-    }
-
     // MARK: - Step title
 
     var stepTitle: String {
@@ -338,15 +335,16 @@ struct CreateFlowView: View {
                     if currentStep >= 1 && draft.moderationState == .untested {
                         Task {
                             isModerating = true
-                            let result = await ModerationService.check(texts: messageTextsFromDraft)
+                            let result = await ModerationService.check(items: draft.userTypedTextItems)
                             isModerating = false
                             switch result {
                             case .clean:
                                 draft.moderationState = .passed
                                 currentStep = next
-                            case .flagged(let categories, let warning):
+                            case .flagged(let categories, let warning, let fields):
                                 moderationFlagged = categories
                                 flaggedWarning = warning
+                                flaggedFields = fields
                                 showHardBlockAlert = true
                             case .unavailable:
                                 showUnavailableAlert = true

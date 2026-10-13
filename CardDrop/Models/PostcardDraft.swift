@@ -165,14 +165,28 @@ class PostcardDraft: ObservableObject {
     /// greeting/phrase text on the card back. The one list
     /// the content-safety check runs over (CreateFlowView, MessageStepView).
     var userTypedTexts: [String] {
-        var texts: [String] = [message, senderNickname, recipientNickname, borderText,
-                               greetingSalutation, greetingClosing, phraseText]
-        if includeBackMessageQR { texts.append(backMessageQRContent) }
-        texts += qrOverlays.map { $0.content }
-        texts += textOverlays.map { $0.text }
-        texts += burstOverlays.map { $0.text }
-        texts += greetingsOverlays.flatMap { [$0.word, $0.scriptText] }
-        return texts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        userTypedTextItems.map { $0.text }
+    }
+
+    /// The same texts as userTypedTexts, in the same order, each with the name
+    /// of the field it came from — used to tell the person WHICH field a
+    /// moderation flag was for ("The message was flagged for ...").
+    var userTypedTextItems: [(label: String, text: String)] {
+        var items: [(label: String, text: String)] = [
+            ("The message", message),
+            ("The \"From\" name", senderNickname),
+            ("The \"To\" name", recipientNickname),
+            ("The border text", borderText),
+            ("The greeting", greetingSalutation),
+            ("The greeting", greetingClosing),
+            ("The phrase", phraseText),
+        ]
+        if includeBackMessageQR { items.append(("The back message", backMessageQRContent)) }
+        items += qrOverlays.map { ("A QR code text", $0.content) }
+        items += textOverlays.map { ("A caption", $0.text) }
+        items += burstOverlays.map { ("A caption", $0.text) }
+        items += greetingsOverlays.flatMap { [("A greetings banner", $0.word), ("A greetings banner", $0.scriptText)] }
+        return items.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     // Transient — not persisted. Write Card's To/From nicknames are

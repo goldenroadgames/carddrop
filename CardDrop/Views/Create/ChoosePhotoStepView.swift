@@ -243,7 +243,7 @@ struct ChoosePhotoStepView: View {
         .alert("Photo Not Allowed", isPresented: $showModerationAlert) {
             Button("Choose a Different Photo", role: .cancel) { isPickerPresented = true }
         } message: {
-            Text("That photo was flagged for: \(flaggedCategories.joined(separator: ", ")). Please choose a different photo." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
+            Text("That photo may contain \(ModerationService.joinedCategories(flaggedCategories)). Please choose a different one." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
         }
         .alert("Can't Check Photo", isPresented: $showUnavailableAlert) {
             Button("OK", role: .cancel) { }
@@ -262,7 +262,7 @@ struct ChoosePhotoStepView: View {
             isModerating = false
 
             switch result {
-            case .flagged(let categories, let warning):
+            case .flagged(let categories, let warning, _):
                 flaggedCategories = categories
                 flaggedWarning = warning
                 showModerationAlert = true

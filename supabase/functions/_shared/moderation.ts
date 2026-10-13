@@ -11,14 +11,18 @@ import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 // Fails closed: if OpenAI can't be reached the verdict is "error".
 export type ModerationVerdict =
   | { status: "clean" }
-  // photo / text say which kind of input was flagged (used by the strike rules
-  // in contentBlocks.ts: a blocked photo counts, blocked text only if harassment).
+  // photo / text say which kind of input was flagged.
   // fingerprints = one-way hash of EACH flagged text/photo, so the same flagged
   // item tried again can be counted once even if other items on the card change
   // (contentBlocks.ts).
   // scores = highest OpenAI score (0-1) per flagged category label, kept with
   // the block record so a borderline flag can be told from a clear one.
-  | { status: "flagged"; categories: string[]; photo: boolean; text: boolean; fingerprints: string[]; scores: Record<string, number> }
+  // parts = the same flags split by kind (one entry for photos if any photo was
+  // flagged, one for text if any text was flagged). Every flagged block counts
+  // as a strike, photos and text each against their own limits (contentBlocks.ts).
+  // textFlags = each flagged (trimmed) text string with its own categories, so the
+  // app can say which field was flagged (moderate-content).
+  | { status: "flagged"; categories: string[]; photo: boolean; text: boolean; fingerprints: string[]; scores: Record<string, number>; parts: BlockPart[]; textFlags: { text: string; categories: string[] }[] }
   | { status: "error" };
 
 // Human-readable names shown to the user (same labels the app used).
@@ -36,6 +40,16 @@ const LABELS: Record<string, string> = {
   "sexual/minors": "content involving minors",
   "violence": "violent content",
   "violence/graphic": "graphic violence",
+};
+
+export type BlockPart = {
+  kind: "photo" | "text";
+  categories: string[];
+  fingerprints: string[];
+  scores: Record<string, number>;
+  // photo parts only: the storage keys of the flagged staged images (not set
+  // for images passed as bytes), so the app can say which image it was.
+  imageKeys?: string[];
 };
 
 type ModerationItem = {
@@ -73,7 +87,7 @@ export async function moderateContent(
     if (!Number.isNaN(score)) thresholds[r.key.replace("moderation_threshold_", "")] = score;
   }
 
-  const calls: { kind: "text" | "photo"; body: unknown; inputs: string[]; image?: Uint8Array }[] = [];
+  const calls: { kind: "text" | "photo"; body: unknown; inputs: string[]; image?: Uint8Array; key?: string }[] = [];
   // One call carries up to 25 texts, each scored separately (a longer list
   // is split into batches, so nothing is left unchecked).
   for (let i = 0; i < texts.length; i += 25) {
@@ -96,6 +110,7 @@ export async function moderateContent(
     calls.push({
       kind: "photo",
       inputs: [],
+      key,
       image: new TextEncoder().encode(key),
       body: {
         model: "omni-moderation-latest",
@@ -111,8 +126,12 @@ export async function moderateContent(
 
   const flagged = new Set<string>();
   const scores: Record<string, number> = {};
+  const kindCategories = { photo: new Set<string>(), text: new Set<string>() };
+  const kindScores: { photo: Record<string, number>; text: Record<string, number> } = { photo: {}, text: {} };
   const flaggedTexts = new Set<string>();
   const flaggedImages: Uint8Array[] = [];
+  const flaggedKeys = new Set<string>();
+  const textFlagMap = new Map<string, Set<string>>();
   let photoFlagged = false;
   let textFlagged = false;
   for (const r of results) {
@@ -123,11 +142,16 @@ export async function moderateContent(
     const aligned = r.call.kind === "photo" || items.length === r.call.inputs.length;
     items.forEach((item, idx) => {
       let itemFlagged = false;
+      const itemLabels = new Set<string>();
       for (const [category, on] of Object.entries(item.categories ?? {})) {
         if (on && (item.category_scores?.[category] ?? 1) >= (thresholds[category] ?? 0)) {
           const label = LABELS[category] ?? category;
           flagged.add(label);
-          scores[label] = Math.max(scores[label] ?? 0, Math.round((item.category_scores?.[category] ?? 0) * 1000) / 1000);
+          const rounded = Math.round((item.category_scores?.[category] ?? 0) * 1000) / 1000;
+          scores[label] = Math.max(scores[label] ?? 0, rounded);
+          itemLabels.add(label);
+          kindCategories[r.call.kind].add(label);
+          kindScores[r.call.kind][label] = Math.max(kindScores[r.call.kind][label] ?? 0, rounded);
           itemFlagged = true;
         }
       }
@@ -135,22 +159,44 @@ export async function moderateContent(
       if (r.call.kind === "photo") {
         photoFlagged = true;
         if (r.call.image) flaggedImages.push(r.call.image);
+        if (r.call.key) flaggedKeys.add(r.call.key);
       } else {
         textFlagged = true;
-        if (aligned) {
-          if (r.call.inputs[idx] !== undefined) flaggedTexts.add(r.call.inputs[idx]);
-        } else {
-          for (const t of r.call.inputs) flaggedTexts.add(t);
+        const flaggedHere = aligned ? (r.call.inputs[idx] !== undefined ? [r.call.inputs[idx]] : []) : r.call.inputs;
+        for (const t of flaggedHere) {
+          flaggedTexts.add(t);
+          const set = textFlagMap.get(t) ?? new Set<string>();
+          itemLabels.forEach((l) => set.add(l));
+          textFlagMap.set(t, set);
         }
       }
     });
   }
   if (flagged.size === 0) return { status: "clean" };
 
-  const fingerprints = await Promise.all([
-    ...Array.from(flaggedTexts).map((t) => sha256Hex(new TextEncoder().encode(t))),
-    ...flaggedImages.map((img) => sha256Hex(img)),
-  ]);
+  const textFingerprints = await Promise.all(
+    Array.from(flaggedTexts).map((t) => sha256Hex(new TextEncoder().encode(t))),
+  );
+  const photoFingerprints = await Promise.all(flaggedImages.map((img) => sha256Hex(img)));
+  const fingerprints = [...textFingerprints, ...photoFingerprints];
+  const parts: BlockPart[] = [];
+  if (photoFlagged) {
+    parts.push({
+      kind: "photo",
+      categories: Array.from(kindCategories.photo).sort(),
+      fingerprints: Array.from(new Set(photoFingerprints)),
+      scores: kindScores.photo,
+      imageKeys: Array.from(flaggedKeys),
+    });
+  }
+  if (textFlagged) {
+    parts.push({
+      kind: "text",
+      categories: Array.from(kindCategories.text).sort(),
+      fingerprints: Array.from(new Set(textFingerprints)),
+      scores: kindScores.text,
+    });
+  }
   return {
     status: "flagged",
     categories: Array.from(flagged).sort(),
@@ -158,6 +204,8 @@ export async function moderateContent(
     text: textFlagged,
     fingerprints: Array.from(new Set(fingerprints)),
     scores,
+    parts,
+    textFlags: Array.from(textFlagMap, ([text, cats]) => ({ text, categories: Array.from(cats).sort() })),
   };
 }
 

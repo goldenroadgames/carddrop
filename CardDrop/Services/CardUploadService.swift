@@ -18,10 +18,11 @@ enum CardUploadService {
         case suspended
         case monthlyLimitReached(tier: String)
         case lifetimeLimitReached(tier: String)
-        case contentFlagged(warning: String?)
+        case contentFlagged(warning: String?, details: [String])
         case moderationUnavailable
         case rateLimited
         case termsRequired
+        case qrTextNotAllowed
 
         var errorDescription: String? {
             switch self {
@@ -37,13 +38,16 @@ enum CardUploadService {
                 return monthlyLimitMessage(tier: tier)
             case .lifetimeLimitReached(let tier):
                 return lifetimeLimitMessage(tier: tier)
-            case .contentFlagged(let warning):
+            case .contentFlagged(let warning, let details):
                 let base = "This card can't be sent because it may not meet our content standards."
-                return warning.map { base + "\n\n" + $0 } ?? base
+                let parts = [base] + details + (warning.map { [$0] } ?? [])
+                return parts.joined(separator: "\n\n")
             case .moderationUnavailable:
                 return "We can't check your card right now. Please try again in a moment."
             case .termsRequired:
                 return "Please agree to the Terms of Service to send cards, then tap Send again."
+            case .qrTextNotAllowed:
+                return QRTextRules.message
             case .rateLimited:
                 return "You're sending cards faster than we allow. Please try again in a little while. If you think this is a mistake, contact support@carddropapp.com."
             }
@@ -434,6 +438,7 @@ enum CardUploadService {
             let tier: String?
             let error: String?
             let warning: String?   // content_flagged: "warn" | "final" | "none"
+            let flagged: [FlaggedPart]?   // content_flagged: what was flagged, by kind
         }
 
         let body = RequestBody(
@@ -479,7 +484,7 @@ enum CardUploadService {
             if case .httpError(_, let data) = fnError,
                let body = try? JSONDecoder().decode(ResponseBody.self, from: data),
                let errorCode = body.error {
-                throw mapEdgeError(errorCode, tier: body.tier ?? "anonymous", warning: body.warning)
+                throw mapEdgeError(errorCode, tier: body.tier ?? "anonymous", warning: body.warning, flagged: body.flagged)
             }
             throw UploadError.edgeFunctionFailed(fnError.localizedDescription)
         } catch {
@@ -487,15 +492,18 @@ enum CardUploadService {
         }
     }
 
-    private static func mapEdgeError(_ code: String, tier: String, warning: String? = nil) -> UploadError {
+    private static func mapEdgeError(_ code: String, tier: String, warning: String? = nil, flagged: [FlaggedPart]? = nil) -> UploadError {
         switch code {
         case "suspended":              return .suspended
         case "monthly_limit_reached":  return .monthlyLimitReached(tier: tier)
         case "lifetime_limit_reached": return .lifetimeLimitReached(tier: tier)
-        case "content_flagged":        return .contentFlagged(warning: ModerationService.warningMessage(warning))
+        case "content_flagged":
+            let details = ModerationService.sendDetails(flagged ?? [])
+            return .contentFlagged(warning: ModerationService.warningMessage(warning), details: details)
         case "moderation_unavailable": return .moderationUnavailable
         case "rate_limited":           return .rateLimited
         case "terms_required":         return .termsRequired
+        case "qr_text_not_allowed":    return .qrTextNotAllowed
         default:                       return .edgeFunctionFailed(code)
         }
     }

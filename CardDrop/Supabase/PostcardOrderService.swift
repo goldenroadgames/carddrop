@@ -76,6 +76,8 @@ struct LOBSubmissionResult: Decodable {
 private struct ErrorEnvelope: Decodable {
     let error: String?
     let detail: String?
+    let warning: String?          // content_flagged: "warn" | "final" | "none"
+    let flagged: [FlaggedPart]?   // content_flagged: what was flagged, by kind and image
 }
 
 enum PostcardOrderService {
@@ -195,6 +197,14 @@ enum PostcardOrderService {
     private static func mapFunctionsError(_ fnError: FunctionsError) -> PostcardOrderServiceError {
         if case .httpError(_, let data) = fnError,
            let body = try? JSONDecoder().decode(ErrorEnvelope.self, from: data) {
+            if body.error == "content_flagged" {
+                // Same wording as a refused Send: the base line, what was
+                // flagged, then the suspension warning if one applies.
+                let base = "This card can't be sent because it may not meet our content standards."
+                let parts = [base] + ModerationService.sendDetails(body.flagged ?? [])
+                    + (ModerationService.warningMessage(body.warning).map { [$0] } ?? [])
+                return .other(parts.joined(separator: "\n\n"))
+            }
             return .other(body.detail ?? body.error ?? fnError.localizedDescription)
         }
         return .other(fnError.localizedDescription)

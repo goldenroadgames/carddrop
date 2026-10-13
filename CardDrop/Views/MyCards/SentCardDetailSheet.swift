@@ -29,7 +29,6 @@ struct SentCardDetailSheet: View {
     @State private var reactions: [CardReaction] = []
     @State private var replies: [CardReply] = []
     @State private var isLoading = true
-    @State private var selectedPhoto: PhotoRef? = nil
 
     // This card's own "Allow replies" switch (cards.replies_enabled). The
     // profile switch overrides it; see CardReplyService.profileRepliesEnabled.
@@ -66,9 +65,6 @@ struct SentCardDetailSheet: View {
                 actionBar
             }
         }
-        .fullScreenCover(item: $selectedPhoto) { photo in
-            ReplyPhotoViewer(url: photo.url)
-        }
         .confirmationDialog("Turn off replies for this card?", isPresented: $showRepliesOffChoice, titleVisibility: .visible) {
             Button("Hide existing replies") { setCardReplies(false, deleteExisting: false) }
             Button("Delete existing replies", role: .destructive) { setCardReplies(false, deleteExisting: true) }
@@ -88,7 +84,7 @@ struct SentCardDetailSheet: View {
             Button("Delete", role: .destructive) { deleteReply(reply) }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("The reply and its photo are removed for good.")
+            Text("The reply is removed for good.")
         }
         .alert("Couldn't update replies", isPresented: $repliesErrorShown) {
             Button("OK", role: .cancel) {}
@@ -322,7 +318,6 @@ struct SentCardDetailSheet: View {
                     ForEach(replies) { reply in
                         ReplyRow(
                             reply: reply,
-                            onPhotoTap: { url in selectedPhoto = PhotoRef(url: url) },
                             onDelete: { replyToDelete = reply }
                         )
                             .padding(.vertical, 4)
@@ -374,114 +369,9 @@ struct SentCardDetailSheet: View {
     }
 }
 
-private struct PhotoRef: Identifiable {
-    let id = UUID()
-    let url: URL
-}
-
-// Full-screen photo-reply viewer — tap a reply's photo in the "Replies"
-// list to land here, with a save-to-camera-roll action. Downloads its own
-// UIImage (rather than reusing AsyncImage's SwiftUI Image) since saving to
-// Photos needs the raw UIImage, not a renderable view.
-private struct ReplyPhotoViewer: View {
-    let url: URL
-    @Environment(\.dismiss) private var dismiss
-    @State private var image: UIImage? = nil
-    @State private var isSaving = false
-    @State private var statusMessage: String? = nil
-
-    var body: some View {
-        ZStack {
-            Color(white: 0.93).ignoresSafeArea()
-
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                ProgressView()
-            }
-
-            VStack {
-                HStack {
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 21, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 45, height: 45)
-                            .background(Color.brandBlue)
-                            .clipShape(Circle())
-                    }
-                    Spacer()
-                    if image != nil {
-                        Button(action: save) {
-                            Image(systemName: "arrow.down")
-                                .font(.system(size: 21, weight: .semibold))
-                                .foregroundColor(.white)
-                                .frame(width: 45, height: 45)
-                                .background(Color.brandBlue)
-                                .clipShape(Circle())
-                        }
-                        .disabled(isSaving)
-                    }
-                }
-                .padding(16)
-
-                Spacer()
-
-                if let statusMessage {
-                    Text(statusMessage)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.brandBlue)
-                        .cornerRadius(999)
-                        .padding(.bottom, 24)
-                }
-            }
-        }
-        .task {
-            guard image == nil, let (data, _) = try? await URLSession.shared.data(from: url) else { return }
-            image = UIImage(data: data)
-        }
-    }
-
-    private func save() {
-        guard let image, !isSaving else { return }
-        isSaving = true
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            DispatchQueue.main.async {
-                guard status == .authorized || status == .limited else {
-                    isSaving = false
-                    showStatus("Enable Photos access in Settings to save")
-                    return
-                }
-                PHPhotoLibrary.shared().performChanges({
-                    PHAssetChangeRequest.creationRequestForAsset(from: image)
-                }) { success, _ in
-                    DispatchQueue.main.async {
-                        isSaving = false
-                        showStatus(success ? "Saved to Photos" : "Couldn't save photo")
-                    }
-                }
-            }
-        }
-    }
-
-    private func showStatus(_ text: String) {
-        statusMessage = text
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            if statusMessage == text { statusMessage = nil }
-        }
-    }
-}
-
-// One reply = its text (with the date) and, if it came with one, its photo
-// right below the text. Tapping the photo opens the full-screen viewer.
+// One reply = its text (with the date).
 private struct ReplyRow: View {
     let reply: CardReply
-    let onPhotoTap: (URL) -> Void
     let onDelete: () -> Void
 
     private var dateLabel: String {
@@ -494,10 +384,6 @@ private struct ReplyRow: View {
     // rather than splitting mid-date across lines.
     private var nonBreakingDateLabel: String {
         dateLabel.replacingOccurrences(of: " ", with: "\u{00A0}")
-    }
-
-    private var photoURL: URL? {
-        reply.reply_image_url.flatMap { URL(string: $0) }
     }
 
     var body: some View {
@@ -531,29 +417,6 @@ private struct ReplyRow: View {
             .accessibilityLabel("Delete reply")
             }
 
-            if let url = photoURL {
-                Button(action: { onPhotoTap(url) }) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            // Full photo, own aspect ratio, no crop.
-                            image.resizable().aspectRatio(contentMode: .fit)
-                                .cornerRadius(8)
-                        case .failure:
-                            Color(.secondarySystemBackground)
-                                .frame(height: 110)
-                                .cornerRadius(8)
-                        default:
-                            Color(.secondarySystemBackground)
-                                .frame(height: 110)
-                                .overlay(ProgressView())
-                                .cornerRadius(8)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: 220, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

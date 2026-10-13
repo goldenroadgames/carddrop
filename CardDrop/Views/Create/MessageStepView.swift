@@ -18,6 +18,7 @@ struct MessageStepView: View {
     @State private var isModerating = false
     @State private var flaggedCategories: [String] = []
     @State private var flaggedWarning: String? = nil
+    @State private var flaggedFields: [FlaggedField] = []
     @State private var showHardBlockAlert = false
     @State private var showUnavailableAlert = false
 
@@ -243,15 +244,16 @@ struct MessageStepView: View {
                     }
                     Task {
                         isModerating = true
-                        let result = await ModerationService.check(texts: messageTexts)
+                        let result = await ModerationService.check(items: draft.userTypedTextItems)
                         isModerating = false
                         switch result {
                         case .clean:
                             draft.moderationState = .passed
                             onNext()
-                        case .flagged(let categories, let warning):
+                        case .flagged(let categories, let warning, let fields):
                             flaggedCategories = categories
                             flaggedWarning = warning
+                            flaggedFields = fields
                             showHardBlockAlert = true
                         case .unavailable:
                             showUnavailableAlert = true
@@ -284,7 +286,9 @@ struct MessageStepView: View {
             Button("Edit Front") { onGoToStyleIt() }
             Button("Edit Back") { }
         } message: {
-            Text("Your photo or text was flagged for: \(flaggedCategories.joined(separator: ", ")). Please check your photo, message, captions, greetings and names, then try again." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
+            Text(ModerationService.alertMessage(
+                categories: flaggedCategories, fields: flaggedFields, warning: flaggedWarning,
+                fallback: "Your photo or text may contain \(ModerationService.joinedCategories(flaggedCategories)). Please review your photo, message, captions, greetings and names, then try again."))
         }
         .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
             Button("OK", role: .cancel) { }
@@ -294,12 +298,9 @@ struct MessageStepView: View {
         .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
-    // All user-typed text on the card, not just this step's fields: passing
-    // here sets moderationState to .passed, so it has to cover everything
-    // (see PostcardDraft.userTypedTexts).
-    private var messageTexts: [String] {
-        draft.userTypedTexts
-    }
+    // The check below runs over all user-typed text on the card, not just this
+    // step's fields: passing here sets moderationState to .passed, so it has to
+    // cover everything (see PostcardDraft.userTypedTextItems).
 
     // MARK: - Greeting carousel
 

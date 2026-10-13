@@ -148,7 +148,7 @@ class AuthManager: NSObject, ObservableObject {
     }
 
     /// Profile "Allow replies" switch for ALL cards. When turning off,
-    /// deleteExisting permanently removes replies, photos and reactions
+    /// deleteExisting permanently removes replies and reactions
     /// already received; otherwise they are just hidden and come back if
     /// replies are turned on again. Returns false if the server call failed
     /// (nothing changes).

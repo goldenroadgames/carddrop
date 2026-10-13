@@ -415,8 +415,10 @@ struct TextOverlayStepView: View {
     // Content-safety check on the captions and greetings banner when Next is
     // tapped (the same check runs again on Write Card and at send time).
     @State private var isModerating = false
+    @State private var showQRTextAlert = false
     @State private var flaggedCategories: [String] = []
     @State private var flaggedWarning: String? = nil
+    @State private var flaggedFields: [FlaggedField] = []
     @State private var showFlaggedAlert = false
     @State private var showUnavailableAlert = false
     // Live-preview state for the Greetings quick-add sheet: a real badge is put
@@ -494,21 +496,28 @@ struct TextOverlayStepView: View {
                         .opacity(isCoveringControlsOpen ? 0 : 1)
                         .allowsHitTesting(!isCoveringControlsOpen)
                     Button {
+                        // QR text must be plain text (no links, phone numbers
+                        // or email addresses) — see QRTextRules.
+                        if draft.qrOverlays.contains(where: { QRTextRules.isNotPlainText($0.userInputText) }) {
+                            showQRTextAlert = true
+                            return
+                        }
                         if draft.moderationState == .passed {
                             onNext()
                             return
                         }
                         Task {
                             isModerating = true
-                            let result = await ModerationService.check(texts: draft.userTypedTexts)
+                            let result = await ModerationService.check(items: draft.userTypedTextItems)
                             isModerating = false
                             switch result {
                             case .clean:
                                 draft.moderationState = .passed
                                 onNext()
-                            case .flagged(let categories, let warning):
+                            case .flagged(let categories, let warning, let fields):
                                 flaggedCategories = categories
                                 flaggedWarning = warning
+                                flaggedFields = fields
                                 showFlaggedAlert = true
                             case .unavailable:
                                 showUnavailableAlert = true
@@ -533,7 +542,14 @@ struct TextOverlayStepView: View {
                     .alert("Content Not Allowed", isPresented: $showFlaggedAlert) {
                         Button("OK", role: .cancel) { }
                     } message: {
-                        Text("Your photo or text was flagged for: \(flaggedCategories.joined(separator: ", ")). Please check your photo, captions and greetings, then try again." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
+                        Text(ModerationService.alertMessage(
+                            categories: flaggedCategories, fields: flaggedFields, warning: flaggedWarning,
+                            fallback: "Your photo or text may contain \(ModerationService.joinedCategories(flaggedCategories)). Please review your photo, captions and greetings, then try again."))
+                    }
+                    .alert("Plain Text Only", isPresented: $showQRTextAlert) {
+                        Button("OK", role: .cancel) { }
+                    } message: {
+                        Text(QRTextRules.message)
                     }
                     .alert("Can't Check Content", isPresented: $showUnavailableAlert) {
                         Button("OK", role: .cancel) { }

@@ -1,11 +1,9 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
-// Deletes one reply (row and photo file) from one of the caller's cards.
-// Senders have no delete right on replies and no write access to the
-// reply-photos bucket, so this runs with the service role after checking the
+// Deletes one reply from one of the caller's cards. Senders have no delete
+// right on replies, so this runs with the service role after checking the
 // caller owns the card. A reported card is kept as evidence and is locked.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PHOTO_MARKER = "/storage/v1/object/public/reply-photos/";
 
 Deno.serve(async (req) => {
   try {
@@ -27,7 +25,7 @@ Deno.serve(async (req) => {
 
     const { data: reply } = await supabase
       .from("replies")
-      .select("id, card_id, reply_image_url")
+      .select("id, card_id")
       .eq("id", replyID)
       .maybeSingle();
     if (!reply) return json({ status: "not_found" });
@@ -44,16 +42,6 @@ Deno.serve(async (req) => {
     if (deleteError) {
       console.error("delete-reply error:", deleteError);
       return json({ error: "delete_failed" }, 500);
-    }
-
-    // Remove the photo file. The stored URL is the public URL; the object path
-    // is everything after the bucket name.
-    const url: string | null = reply.reply_image_url;
-    const at = url ? url.indexOf(PHOTO_MARKER) : -1;
-    if (url && at >= 0) {
-      const path = decodeURIComponent(url.slice(at + PHOTO_MARKER.length).split("?")[0]);
-      const { error: rmError } = await supabase.storage.from("reply-photos").remove([path]);
-      if (rmError) console.error("delete-reply photo remove error:", rmError);
     }
 
     return json({ status: "deleted" });

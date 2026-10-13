@@ -1,5 +1,5 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
-import { moderateAndPromote } from "../_shared/cardImages.ts";
+import { imageRole, moderateAndPromote } from "../_shared/cardImages.ts";
 import { recordContentBlock } from "../_shared/contentBlocks.ts";
 
 // Submits an authorized (not yet charged — see migration 030) physical_orders
@@ -110,17 +110,21 @@ Deno.serve(async (req) => {
       const verdict = promoted.verdict;
       const outcome = await recordContentBlock(supabase, {
         userId: user.id,
-        photo: verdict.photo,
-        text: verdict.text,
-        categories: verdict.categories,
-        fingerprints: verdict.fingerprints,
-        scores: verdict.scores,
+        parts: verdict.parts,
       });
       const cancelError = await releaseHold(supabase, order, "Content flagged by moderation");
       if (outcome.suspended) return json({ error: "suspended" }, 403);
       return json({
         error: "content_flagged",
         categories: verdict.categories,
+        // What was flagged, by kind and image, so the app can say which.
+        flagged: verdict.parts.map((p) => ({
+          kind: p.kind,
+          categories: p.categories,
+          images: p.kind === "photo"
+            ? Array.from(new Set((p.imageKeys ?? []).map(imageRole).filter((r) => r !== "other")))
+            : undefined,
+        })),
         warning: outcome.warning,
         holdReleaseFailed: cancelError !== null,
       }, 422);

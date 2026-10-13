@@ -153,7 +153,7 @@ struct PostcardAddressStepView: View {
                             switch result {
                             case .clean:
                                 onContinue(selectedSender, selectedRecipient, price)
-                            case .flagged(let categories, let warning):
+                            case .flagged(let categories, let warning, _):
                                 flaggedCategories = categories
                                 flaggedWarning = warning
                                 showFlaggedAlert = true
@@ -207,7 +207,7 @@ struct PostcardAddressStepView: View {
             .alert("Content Not Allowed", isPresented: $showFlaggedAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("A name or address was flagged for: \(flaggedCategories.joined(separator: ", ")). Please edit the address and try again." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
+                Text("A name or address may contain \(ModerationService.joinedCategories(flaggedCategories)). Please edit the address and try again." + (flaggedWarning.map { "\n\n" + $0 } ?? ""))
             }
             .alert("Can't Check Addresses", isPresented: $showUnavailableAlert) {
                 Button("OK", role: .cancel) {}

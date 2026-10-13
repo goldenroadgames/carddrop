@@ -111,22 +111,6 @@ private struct ReplyBubble: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            // Photo
-            if let urlString = reply.reply_image_url, let url = URL(string: urlString) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFit().frame(maxWidth: .infinity).cornerRadius(8)
-                    case .failure:
-                        EmptyView()
-                    case .empty:
-                        ProgressView().frame(maxWidth: .infinity)
-                    @unknown default:
-                        EmptyView()
-                    }
-                }
-            }
-
             // Text with date appended
             let text = reply.reply_text ?? ""
             let display = text.isEmpty ? dateLabel : "\(text) \(dateLabel)"

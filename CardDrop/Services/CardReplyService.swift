@@ -9,7 +9,6 @@ struct CardReaction: Decodable {
 struct CardReply: Decodable, Identifiable {
     var id: UUID
     let reply_text: String?
-    let reply_image_url: String?
     let sent_at: Date?
 }
 
@@ -48,7 +47,7 @@ enum CardReplyService {
 
     /// Turns replies + reactions on/off for one card (cardID given) or for the
     /// whole account (cardID nil). deleteExisting (only when turning off)
-    /// permanently removes the replies, photos and reactions already received.
+    /// permanently removes the replies and reactions already received.
     /// Returns false if the server call failed.
     static func setRepliesEnabled(_ enabled: Bool, cardID: UUID?, deleteExisting: Bool) async -> Bool {
         do {
@@ -68,7 +67,7 @@ enum CardReplyService {
 
     private struct DeleteReplyBody: Encodable { let replyID: String }
 
-    /// Deletes one reply (its text and its photo) from the server.
+    /// Deletes one reply (its text) from the server.
     static func deleteReply(id: UUID) async -> Bool {
         do {
             try await supabase.functions.invoke(
@@ -96,7 +95,7 @@ enum CardReplyService {
         guard await repliesAllowed(for: cardID) else { return [] }
         let rows: [CardReply] = try await supabase
             .from("replies")
-            .select("id, reply_text, reply_image_url, sent_at")
+            .select("id, reply_text, sent_at")
             .eq("card_id", value: cardID.uuidString)
             .order("sent_at", ascending: false)
             .execute()

@@ -1,6 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { isBanned } from "../_shared/bans.ts";
-import { moderateAndPromote } from "../_shared/cardImages.ts";
+import { qrTextViolation } from "../_shared/qrText.ts";
+import { imageRole, moderateAndPromote } from "../_shared/cardImages.ts";
 import { recordContentBlock } from "../_shared/contentBlocks.ts";
 import { removeFolder } from "../_shared/purgeCard.ts";
 import { termsAccepted } from "../_shared/terms.ts";
@@ -30,6 +31,14 @@ Deno.serve(async (req) => {
 
     if (!cardID)    return json({ error: "cardID required" }, 400);
     if (!deviceUUID) return json({ error: "deviceUUID required" }, 400);
+
+    // QR text must be plain text: no links, phone numbers or email addresses
+    // (see _shared/qrText.ts). Not a moderation strike, nothing is recorded.
+    for (const qrText of [frontInkMessage, backInkMessage]) {
+      if (typeof qrText === "string" && qrTextViolation(qrText)) {
+        return json({ error: "qr_text_not_allowed" }, 400);
+      }
+    }
 
     // A deleted card is a tombstone: re-sending it would refill the blanked
     // row (the upsert below) while deleted_at stays set.
@@ -204,19 +213,28 @@ Deno.serve(async (req) => {
       if (result.status === "flagged") {
         const verdict = result.verdict;
         await removeFolder(supabase, "card-images", user.id, cardPath);
-        // Record the block and apply the strike rules (blocked photos and
-        // harassment count; see _shared/contentBlocks.ts).
+        // Record the block and apply the strike rules (every flagged block counts;
+        // see _shared/contentBlocks.ts).
         const outcome = await recordContentBlock(supabase, {
           userId: user.id,
           deviceUUID,
-          photo: verdict.photo,
-          text: verdict.text,
-          categories: verdict.categories,
-          fingerprints: verdict.fingerprints,
-          scores: verdict.scores,
+          parts: verdict.parts,
         });
         if (outcome.suspended) return json({ error: "suspended" }, 403);
-        return json({ error: "content_flagged", categories: verdict.categories, warning: outcome.warning }, 422);
+        return json({
+          error: "content_flagged",
+          categories: verdict.categories,
+          // What was flagged, by kind, so the app can say "a photo" or "text".
+          flagged: verdict.parts.map((p) => ({
+            kind: p.kind,
+            categories: p.categories,
+            // photo parts: which image it was ("front" | "back" | "original")
+            images: p.kind === "photo"
+              ? Array.from(new Set((p.imageKeys ?? []).map(imageRole).filter((r) => r !== "other")))
+              : undefined,
+          })),
+          warning: outcome.warning,
+        }, 422);
       }
     }
 
