@@ -29,6 +29,9 @@ struct SentCardDetailSheet: View {
     @State private var reactions: [CardReaction] = []
     @State private var replies: [CardReply] = []
     @State private var isLoading = true
+    // The server's copy expired and was removed (cards.purged_at); the card
+    // can still be sent again from this device.
+    @State private var expiredOnServer = false
 
     // This card's own "Allow replies" switch (cards.replies_enabled). The
     // profile switch overrides it; see CardReplyService.profileRepliesEnabled.
@@ -99,10 +102,12 @@ struct SentCardDetailSheet: View {
             async let reacts    = (try? CardReplyService.fetchReactions(for: cardID)) ?? []
             async let allReplies = (try? CardReplyService.fetchReplies(for: cardID)) ?? []
             async let cardFlag  = CardReplyService.cardRepliesEnabled(for: cardID)
+            async let expired   = CardRecipientService.isExpiredOnServer(cardID)
             recipients = await history
             reactions  = await reacts
             replies    = await allReplies
             cardRepliesEnabled = await cardFlag
+            expiredOnServer = await expired
             isLoading  = false
         }
     }
@@ -259,6 +264,11 @@ struct SentCardDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 16)
+            } else if expiredOnServer {
+                Text("Expired and removed from CardDrop's server. You can still send it again.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 16)
             } else if recipients.isEmpty {
                 Text("No send record found for this card.")
                     .font(.caption)

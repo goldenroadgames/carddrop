@@ -50,4 +50,19 @@ enum CardRecipientService {
             .value
         return rows
     }
+
+    private struct PurgedRow: Decodable { let purged_at: Date? }
+
+    /// True when the server's copy of this card was removed after it expired
+    /// (cards.purged_at is set; a re-send clears it). False if the lookup fails.
+    static func isExpiredOnServer(_ cardID: UUID) async -> Bool {
+        let rows: [PurgedRow]? = try? await supabase
+            .from("cards")
+            .select("purged_at")
+            .eq("id", value: cardID.uuidString.lowercased())
+            .limit(1)
+            .execute()
+            .value
+        return rows?.first?.purged_at != nil
+    }
 }
