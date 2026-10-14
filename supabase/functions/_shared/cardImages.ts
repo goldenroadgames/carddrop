@@ -12,11 +12,12 @@ import { moderateContent, type ModerationVerdict } from "./moderation.ts";
 //   print files  {id}_front_forLOB_<size>.jpg / _back_forLOB_<size>.jpg
 //                -> moderated, then promoted to card-images (Lob fetches them)
 //   private      {id}_full.jpg _before_full.jpg
-//                -> NOT moderated, so never public: copied to card-private
-//                   (used only by the admin marketing copy)
+//                -> moderated, then copied to card-private (not public; the
+//                   admin marketing copy later moves them to marketing-cards)
 const WEB_SUFFIXES = ["", "_back", "_back6x9", "_thumb", "_before", "_before_thumb"];
 const PRIVATE_SUFFIXES = ["_full", "_before_full"];
 const STAGING = "card-staging";
+const HOLDING = "card-holding";
 const PUBLIC = "card-images";
 const PRIVATE = "card-private";
 
@@ -52,39 +53,73 @@ export async function moderateAndPromote(
   for (const n of opts.printNames ?? []) if (!staged.has(n) && !publicNames.has(n)) missing.push(n);
   if (missing.length > 0) return { status: "missing", names: missing };
 
-  // Moderate every file that will become public. OpenAI fetches each one
-  // through a short-lived signed URL.
-  const toCheck = [...webNames, ...printNames];
-  const imageUrls: { url: string; key: string }[] = [];
-  for (const name of toCheck) {
-    const { data, error } = await supabase.storage.from(STAGING).createSignedUrl(`${folder}/${name}`, 600);
-    if (error || !data?.signedUrl) return { status: "error" };
-    imageUrls.push({ url: data.signedUrl, key: `${folder}/${name}` });
+  // Freeze the bytes first: copy every file to the server-only holding bucket
+  // (the client can write card-staging, so it could swap a staged file after
+  // it was checked). Moderate and promote from the holding copies only.
+  const publicFiles = [...webNames, ...printNames];
+  const toCheck = [...publicFiles, ...privateNames];
+  const heldKeys = toCheck.map((n) => `${folder}/${n}`);
+  // Files are independent, so each step runs for all of them at once (a card
+  // has about ten).
+  const holdResults = await Promise.all(heldKeys.map(async (key) => {
+    await supabase.storage.from(HOLDING).remove([key]);
+    const { error } = await supabase.storage.from(STAGING).copy(key, key, { destinationBucket: HOLDING });
+    if (error) console.error("hold copy error:", key, error.message);
+    return !error;
+  }));
+  if (holdResults.includes(false)) {
+    await removeHeld(supabase, heldKeys);
+    return { status: "error" };
+  }
+
+  // Moderate every held file. OpenAI fetches each one through a short-lived
+  // signed URL.
+  const signed = await Promise.all(heldKeys.map(async (key) => {
+    const { data, error } = await supabase.storage.from(HOLDING).createSignedUrl(key, 600);
+    return error || !data?.signedUrl ? null : { url: data.signedUrl, key };
+  }));
+  const imageUrls = signed.filter((x): x is { url: string; key: string } => x !== null);
+  if (imageUrls.length !== heldKeys.length) {
+    await removeHeld(supabase, heldKeys);
+    return { status: "error" };
   }
   const verdict = await moderateContent(supabase, { texts: opts.texts, imageUrls });
-  if (verdict.status === "error") return { status: "error" };
+  if (verdict.status === "error") {
+    await removeHeld(supabase, heldKeys);
+    return { status: "error" };
+  }
   if (verdict.status === "flagged") {
+    await removeHeld(supabase, heldKeys);
     await removeStaged(supabase, folder, id);
     return { status: "flagged", verdict };
   }
 
-  // Clean: copy across (remove first so a re-send replaces the old copy),
-  // then clear the staged files.
-  const promoted: string[] = [];
-  for (const [names, bucket] of [[toCheck, PUBLIC], [privateNames, PRIVATE]] as const) {
-    for (const name of names) {
-      const to = `${folder}/${name}`;
-      await supabase.storage.from(bucket).remove([to]);
-      const { error } = await supabase.storage.from(STAGING).copy(to, to, { destinationBucket: bucket });
-      if (error) {
-        console.error("promote copy error:", name, error.message);
-        return { status: "error" };
-      }
-      promoted.push(name);
-    }
+  // Clean: copy the held (checked) files across (remove first so a re-send
+  // replaces the old copy), then clear the held and staged files.
+  const jobs = [
+    ...publicFiles.map((name) => ({ name, bucket: PUBLIC })),
+    ...privateNames.map((name) => ({ name, bucket: PRIVATE })),
+  ];
+  const copied = await Promise.all(jobs.map(async ({ name, bucket }) => {
+    const to = `${folder}/${name}`;
+    await supabase.storage.from(bucket).remove([to]);
+    const { error } = await supabase.storage.from(HOLDING).copy(to, to, { destinationBucket: bucket });
+    if (error) console.error("promote copy error:", name, error.message);
+    return error ? null : name;
+  }));
+  if (copied.includes(null)) {
+    await removeHeld(supabase, heldKeys);
+    return { status: "error" };
   }
+  const promoted = copied as string[];
+  await removeHeld(supabase, heldKeys);
   await removeStaged(supabase, folder, id);
   return { status: "ok", promoted };
+}
+
+// Removes held copies (best effort; holding is server-only and short-lived).
+async function removeHeld(supabase: SupabaseClient, keys: string[]) {
+  if (keys.length > 0) await supabase.storage.from(HOLDING).remove(keys);
 }
 
 // Removes every staged file for a card.
@@ -120,8 +155,8 @@ async function listNames(
 export function imageRole(key: string): "front" | "back" | "original" | "other" {
   const name = (key.split("/").pop() ?? "").replace(/\.jpg$/i, "");
   const suffix = name.slice(36);
-  if (suffix === "" || suffix === "_thumb" || suffix.startsWith("_front_forLOB")) return "front";
+  if (suffix === "" || suffix === "_thumb" || suffix === "_full" || suffix.startsWith("_front_forLOB")) return "front";
   if (suffix === "_back" || suffix === "_back6x9" || suffix.startsWith("_back_forLOB")) return "back";
-  if (suffix === "_before" || suffix === "_before_thumb") return "original";
+  if (suffix === "_before" || suffix === "_before_thumb" || suffix === "_before_full") return "original";
   return "other";
 }

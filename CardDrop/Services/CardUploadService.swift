@@ -253,10 +253,11 @@ enum CardUploadService {
         // thumbnail of it for the Inspire grid tiles — same idea as the
         // front's own _thumb.jpg, so the grid isn't loading full-res images.
         if let beforeImage {
-            // Full-resolution original, kept for marketing print use (same
-            // role as `_full.jpg` for the front). Nothing in the app or web
-            // loads it.
-            if let beforeFullData = beforeImage.jpegData(compressionQuality: 0.85) {
+            // Print-size original (2700 px long edge = 9 in at 300 DPI), kept
+            // for marketing print use (same role as `_full.jpg` for the
+            // front). Capped so the server can moderate it. Nothing in the
+            // app or web loads it.
+            if let beforeFullData = resizedJPEG(from: beforeImage, maxDimension: 2700, quality: 0.85) {
                 try await supabase.storage
                     .from("card-staging")
                     .upload(
