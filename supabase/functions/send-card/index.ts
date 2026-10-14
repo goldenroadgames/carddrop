@@ -286,6 +286,7 @@ Deno.serve(async (req) => {
         design_features:    designFeatures   ?? null,
         expires_at:         expiresAt,
         sent_at:            new Date().toISOString(),
+        purged_at:          null,   // a card re-sent after expiry cleanup is live again
       });
 
     if (insertError) {

@@ -40,7 +40,7 @@ Yes, unless the sender does not allow replies. Use the reply and reaction button
 
 ### What happens to replies and reactions when a card expires?
 
-A card link that nobody opens for a long time eventually expires, and when it is removed its replies and reactions are removed with it. If you send the card again, it works again, but the old replies and reactions don't come back.
+A card that nobody opens for a long time eventually expires, and when it is removed its replies and reactions are removed with it. If you send the card again, it works again, but the old replies and reactions don't come back.
 
 ### I got a physical postcard. How do I stop getting them?
 
@@ -48,7 +48,7 @@ Scan the QR code on the card, or open its link, and choose **Report abuse**. Tic
 
 ### I got a card I didn't want.
 
-Use **Report abuse** under the card. We record the report against the sender. Reports on multiple cards can lead to the sender's account being suspended. CardDrop digital cards are sent from the sender's own phone (Messages, Mail), so we can't see or block who they send to. You can also block the sender's number or email on your phone.
+Use **Report abuse** under the card. We record the report against the sender. Reports on multiple cards can lead to the sender's account being suspended. CardDrop digital cards are sent from the sender's own device (Messages, Mail), so we can't see or block who they send to. You can also block the sender's number or email on your device.
 
 ## Contact
 

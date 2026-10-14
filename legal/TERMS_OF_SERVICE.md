@@ -33,6 +33,7 @@ You are responsible for maintaining the confidentiality of your account credenti
   - Registered users can opt out at any time in Settings. When you opt out, we will not select cards from your account from that date forward; we may continue to feature cards we featured before that date.
   - If you delete a card or your account, we will remove it from our servers, but any copy already featured in our marketing and promotional materials, including example galleries shown inside the app, may remain.
   - See our Privacy Policy for more detail on this feature.
+- **Stored copies expire.** We store a copy of each card you send so that its link works. That copy expires if the link isn't opened for a while and is then deleted. Your device keeps its own copy of cards you have sent until you delete them.
 - **Your responsibility.** You represent that you own or have the necessary rights to any photo, image, or content you upload, and that Your Content does not infringe any third party's rights.
 - **Recipient information.** If you submit another person's name, address, phone number, or email address to send them a card, you represent that you have their permission to do so and that you are not using the Service to harass, spam, or contact anyone against their wishes.
 
