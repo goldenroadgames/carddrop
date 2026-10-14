@@ -22,8 +22,10 @@ struct InspireCard: Decodable, Identifiable, Equatable {
     }
 
     /// Small JPEG for the gallery grid.
-    var thumbnailURL: URL {
-        SupabaseConfig.projectURL.appendingPathComponent("storage/v1/object/public/marketing-cards/\(idPath)_thumb.jpg")
+    var thumbnailURL: URL { Self.thumbnailURL(forID: card_id) }
+
+    static func thumbnailURL(forID id: UUID) -> URL {
+        SupabaseConfig.projectURL.appendingPathComponent("storage/v1/object/public/marketing-cards/\(id.uuidString.lowercased())_thumb.jpg")
     }
 
     /// The original, pre-edit photo — the before/after toggle's "before"

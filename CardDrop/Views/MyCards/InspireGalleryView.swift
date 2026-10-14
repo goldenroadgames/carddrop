@@ -71,14 +71,14 @@ private struct InspireCardTile: View {
     private var placeholderAspectRatio: CGFloat { card.is_portrait ? 2.0 / 3.0 : 3.0 / 2.0 }
 
     var body: some View {
-        AsyncImage(url: card.thumbnailURL) { phase in
-            if let image = phase.image {
-                image.resizable().aspectRatio(contentMode: .fit)
+        InspireCachedImage(card: card, kind: .thumb) { image, failed in
+            if let image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
             } else {
                 Rectangle()
                     .fill(Color(.secondarySystemBackground))
                     .aspectRatio(placeholderAspectRatio, contentMode: .fit)
-                    .overlay(phase.error == nil ? AnyView(ProgressView()) : AnyView(EmptyView()))
+                    .overlay(failed ? AnyView(EmptyView()) : AnyView(ProgressView()))
             }
         }
         .clipShape(Rectangle())
@@ -199,7 +199,7 @@ private struct InspireSwipeDeckView: View {
             // the first time a card's raw photo is fetched this session
             // (e.g. right after wrapping around to a card not visited yet).
             if store.cards.indices.contains(currentIndex) {
-                await loadRawImage(from: store.cards[currentIndex].beforeURL)
+                await loadRawImage(for: store.cards[currentIndex])
             }
         }
     }
@@ -218,9 +218,8 @@ private struct InspireSwipeDeckView: View {
         }
     }
 
-    private func loadRawImage(from url: URL) async {
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
-              let image = UIImage(data: data) else { return }
+    private func loadRawImage(for card: InspireCard) async {
+        guard let image = await InspireImageCache.shared.image(card.card_id, .before, from: card.beforeURL) else { return }
         rawUIImage = image
     }
 
@@ -262,9 +261,9 @@ private struct InspireSwipeDeckView: View {
                 .allowsHitTesting(!showingAfter)
                 .position(x: centerX, y: centerY)
 
-                AsyncImage(url: card.frontURL) { phase in
-                    if let image = phase.image {
-                        image.resizable()
+                InspireCachedImage(card: card, kind: .front) { image, _ in
+                    if let image {
+                        Image(uiImage: image).resizable()
                             .frame(width: frontSize.width, height: frontSize.height)
                     }
                 }

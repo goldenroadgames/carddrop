@@ -41,6 +41,26 @@ final class InspireGalleryStore: ObservableObject {
         cards = firstPage
         lastFetchedAt = Date()
         hasMorePages = firstPage.count == pageSize
+        syncImageCache()
+    }
+
+    /// Keeps the on-disk image cache in step with the table: deletes files for
+    /// cards no longer listed and downloads any missing grid thumbnails. Runs
+    /// in the background whenever the list is refetched from the server.
+    private func syncImageCache() {
+        Task.detached(priority: .utility) {
+            struct IDRow: Decodable { let card_id: UUID }
+            guard let rows: [IDRow] = try? await supabase
+                .from("marketing_cards")
+                .select("card_id")
+                .eq("in_inspire", value: true)
+                .range(from: 0, to: 4999)
+                .execute()
+                .value else { return }
+            let ids = rows.map(\.card_id)
+            await InspireImageCache.shared.prune(keeping: Set(ids))
+            await InspireImageCache.shared.prefetchThumbnails(ids: ids)
+        }
     }
 
     /// Standard infinite-scroll trigger — call from the last few grid items'

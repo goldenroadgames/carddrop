@@ -1092,15 +1092,41 @@ struct SendOptionsView: View {
     #endif
 
     private func uploadAndSend(then show: @escaping () -> Void) async {
-        // Sent card re-opened: files already in Supabase, skip upload and go straight to composer
+        // Sent card re-opened: ask the server first. If its files are still
+        // there (expiry is pushed out), skip the upload and go straight to the
+        // composer. If they're gone, fall through to a full re-upload. If the
+        // card can't be resent (deleted/reported/held), say so and hide it.
+        // If the check itself fails (e.g. offline), share the existing link.
         if cardSendResult != nil {
-            teaserImage = draftManager.loadFront(for: draft.cardID)
-            show()
-            return
+            if originalStatus == .sent {
+                isSending = true
+                let check = try? await CardUploadService.checkResend(cardID: draft.cardID)
+                isSending = false
+                switch check {
+                case .unavailable:
+                    draftManager.reportedCardIDs.insert(draft.cardID)
+                    sendError = "This card can't be resent."
+                    showSendErrorAlert = true
+                    return
+                case .needsUpload:
+                    cardSendResult = nil
+                default:
+                    break
+                }
+            }
+            if cardSendResult != nil {
+                teaserImage = draftManager.loadFront(for: draft.cardID)
+                show()
+                return
+            }
         }
 
         guard let frontData = draftManager.loadFrontData(for: draft.cardID),
-              let backData  = draftManager.loadBackData(for: draft.cardID) else { return }
+              let backData  = draftManager.loadBackData(for: draft.cardID) else {
+            sendError = "This card's images aren't on this device, so it can't be sent again."
+            showSendErrorAlert = true
+            return
+        }
         let back6x9Data = draftManager.loadBack6x9Data(for: draft.cardID)
 
         teaserImage = draftManager.loadFront(for: draft.cardID)

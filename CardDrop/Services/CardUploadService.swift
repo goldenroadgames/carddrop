@@ -396,6 +396,29 @@ enum CardUploadService {
         return (frontURL, backURL)
     }
 
+    // MARK: - Resend check
+
+    enum ResendCheck { case live, needsUpload, unavailable }
+
+    /// Asks the server whether a sent card can be shared again as is (live:
+    /// its expiry was just pushed out), must be re-uploaded (files gone), or
+    /// can't be resent at all (deleted, reported or on hold). Throws if the
+    /// call fails, so the caller can fall back to sharing the existing link.
+    static func checkResend(cardID: UUID) async throws -> ResendCheck {
+        struct Body: Encodable { let cardID: String }
+        struct Response: Decodable { let status: String? }
+        let response: Response = try await supabase.functions.invoke(
+            "resend-card",
+            options: FunctionInvokeOptions(body: Body(cardID: cardID.uuidString.lowercased()))
+        )
+        switch response.status {
+        case "live":         return .live
+        case "needs_upload": return .needsUpload
+        case "unavailable":  return .unavailable
+        default:             throw UploadError.edgeFunctionFailed("resend-check")
+        }
+    }
+
     // MARK: - Edge Function
 
     private static func callSendCardFunction(

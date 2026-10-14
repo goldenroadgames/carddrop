@@ -38,6 +38,10 @@ It's a digital postcard. Open the link and the card opens for you to flip, read 
 
 Yes, unless the sender does not allow replies. Use the reply and reaction buttons under the card. Your reply goes back to the person who sent it.
 
+### What happens to replies and reactions when a card expires?
+
+A card link that nobody opens for a long time eventually expires, and when it is removed its replies and reactions are removed with it. If you send the card again, it works again, but the old replies and reactions don't come back.
+
 ### I got a physical postcard. How do I stop getting them?
 
 Scan the QR code on the card, or open its link, and choose **Report abuse**. Tick *stop all senders mailing this address* to block every CardDrop sender from mailing your address. The report also stops that sender from mailing anyone at that address again. We don't ask for your name, email or phone number.
