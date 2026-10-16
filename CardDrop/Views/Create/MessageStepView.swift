@@ -12,7 +12,7 @@ struct MessageStepView: View {
     var onNext: () -> Void
     // Jumps back to Style It, where captions and the greetings banner live —
     // the flagged text may be there rather than on this step.
-    var onGoToStyleIt: () -> Void = {}
+    var onGoToStep: (Int) -> Void = { _ in }
 
     @FocusState private var focus: MessageField?
     @State private var isModerating = false
@@ -283,8 +283,10 @@ struct MessageStepView: View {
         }
         // Hard block — sexual, violence, self-harm, harassment (no override)
         .alert("Content Not Allowed", isPresented: $showHardBlockAlert) {
-            Button("Edit Front") { onGoToStyleIt() }
-            Button("Edit Back") { }
+            // OK sends the person to the lowest step holding a flagged field.
+            Button("OK") {
+                if let step = ModerationService.lowestStep(for: flaggedFields) { onGoToStep(step) }
+            }
         } message: {
             Text(ModerationService.alertMessage(
                 categories: flaggedCategories, fields: flaggedFields, warning: flaggedWarning,

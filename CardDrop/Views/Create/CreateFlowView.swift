@@ -66,11 +66,12 @@ struct CreateFlowView: View {
                 case 0:
                     ChoosePhotoStepView(draft: draft, onNext: { currentStep = 1 })
                 case 1:
-                    TextOverlayStepView(draft: draft, onNext: { currentStep = 2 }, onAlterPhoto: { currentStep = 0 })
+                    TextOverlayStepView(draft: draft, onNext: { currentStep = 2 }, onAlterPhoto: { currentStep = 0 },
+                                        onGoToStep: { currentStep = $0 })
                 case 2:
                     MessageStepView(draft: draft, onNext: {
                         currentStep = 4
-                    }, onGoToStyleIt: { currentStep = 1 })
+                    }, onGoToStep: { currentStep = $0 })
                 case 3:
                     InvisibleInkStepView(draft: draft, onNext: { currentStep = 4 })
                 case 4:
@@ -156,9 +157,10 @@ struct CreateFlowView: View {
 
             .onReceive(draft.objectWillChange) { _ in isDirty = true }
             .alert("Content Not Allowed", isPresented: $showHardBlockAlert) {
-                Button("Edit Front") { currentStep = 1 }
-                Button("Edit Back") { currentStep = 2 }
-                Button("Cancel", role: .cancel) {}
+                // OK sends the person to the lowest step holding a flagged field.
+                Button("OK") {
+                    if let step = ModerationService.lowestStep(for: flaggedFields) { currentStep = step }
+                }
             } message: {
                 Text(ModerationService.alertMessage(
                     categories: moderationFlagged, fields: flaggedFields, warning: flaggedWarning,

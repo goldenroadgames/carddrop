@@ -397,6 +397,8 @@ struct TextOverlayStepView: View {
     var onNext: () -> Void
     // Back to the Photo step (no picker opened) — the "Alter Photo" link.
     var onAlterPhoto: () -> Void = {}
+    // Jump to another step (used when a flagged field lives on a later step).
+    var onGoToStep: (Int) -> Void = { _ in }
 
     @EnvironmentObject private var appSettings: AppSettings
 
@@ -540,7 +542,10 @@ struct TextOverlayStepView: View {
                     }
                     .disabled(isModerating)
                     .alert("Content Not Allowed", isPresented: $showFlaggedAlert) {
-                        Button("OK", role: .cancel) { }
+                        // OK sends the person to the lowest step holding a flagged field.
+                        Button("OK") {
+                            if let step = ModerationService.lowestStep(for: flaggedFields), step != 1 { onGoToStep(step) }
+                        }
                     } message: {
                         Text(ModerationService.alertMessage(
                             categories: flaggedCategories, fields: flaggedFields, warning: flaggedWarning,

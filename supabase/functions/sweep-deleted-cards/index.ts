@@ -140,7 +140,18 @@ Deno.serve(async (req) => {
       newCategories = { error: String(err) };
     }
 
-    return json({ staging, purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions, deleteRequests, history, secured, newCategories });
+    // Marketing copies of people who were kicked off (final suspension, or the
+    // account's data already deleted after a long unappealed suspension). Never
+    // stops the sweep.
+    let marketingRemoved: { removed: number; failed: number } | { error: string };
+    try {
+      marketingRemoved = await sweepMarketingOfSuspended(supabase);
+    } catch (err) {
+      console.error("marketing removal failed:", err);
+      marketingRemoved = { error: String(err) };
+    }
+
+    return json({ staging, purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions, deleteRequests, history, secured, newCategories, marketingRemoved });
   } catch (err) {
     console.error("sweep-deleted-cards error:", err);
     return json({ error: "Internal server error" }, 500);
@@ -379,6 +390,70 @@ async function sweepStaging(supabase: ReturnType<typeof createClient>, maxAgeMs:
     if (folders.length < 100) break;
   }
   return removed;
+}
+
+// Removes the marketing copies (public marketing-cards files + marketing_cards
+// row, which also drops the card from the Inspire gallery and the landing
+// carousel) of every sender who was kicked off: an active suspension that is
+// FINAL (flagged final, or reinstated appeal_max_reinstatements times already)
+// or whose account data was already deleted (purged_at set). A suspension that
+// can still be appealed keeps its marketing cards. Files go first, so a failed
+// run leaves the row and is retried tomorrow.
+// deno-lint-ignore no-explicit-any
+async function sweepMarketingOfSuspended(supabase: any): Promise<{ removed: number; failed: number }> {
+  const { data: cfg } = await supabase.from("zz_config").select("value").eq("key", "appeal_max_reinstatements").maybeSingle();
+  const parsed = parseInt(cfg?.value ?? "", 10);
+  const maxReinstatements = parsed >= 0 ? parsed : 2;
+
+  const { data: bans } = await supabase
+    .from("account_bans")
+    .select("user_id, email, final, purged_at")
+    .is("reinstated_at", null)
+    .not("user_id", "is", null)
+    .limit(200);
+
+  const kickedOut: string[] = [];
+  for (const ban of bans ?? []) {
+    let isFinal = !!ban.final || !!ban.purged_at;
+    if (!isFinal) {
+      const emailOk = ban.email && !/[,()]/.test(ban.email);
+      const { count } = await supabase
+        .from("account_bans")
+        .select("id", { count: "exact", head: true })
+        .not("reinstated_at", "is", null)
+        .or(`user_id.eq.${ban.user_id}${emailOk ? `,email.eq.${ban.email}` : ""}`);
+      isFinal = (count ?? 0) >= maxReinstatements;
+    }
+    if (isFinal) kickedOut.push(ban.user_id);
+  }
+  if (kickedOut.length === 0) return { removed: 0, failed: 0 };
+
+  const { data: cards } = await supabase
+    .from("marketing_cards")
+    .select("card_id")
+    .in("sender_id", kickedOut)
+    .limit(100);
+
+  let removed = 0;
+  let failed = 0;
+  for (const row of cards ?? []) {
+    const id = row.card_id as string;
+    const names = ["", "_thumb", "_full", "_before", "_before_full", "_before_thumb"].map((suffix) => `${id}${suffix}.jpg`);
+    const { error: fileError } = await supabase.storage.from("marketing-cards").remove(names);
+    if (fileError) {
+      console.error("marketing file removal failed:", id, fileError.message);
+      failed++;
+      continue;
+    }
+    const { error: rowError } = await supabase.from("marketing_cards").delete().eq("card_id", id);
+    if (rowError) {
+      console.error("marketing row removal failed:", id, rowError.message);
+      failed++;
+      continue;
+    }
+    removed++;
+  }
+  return { removed, failed };
 }
 
 // Asks OpenAI's moderation endpoint about one harmless text, reads the category

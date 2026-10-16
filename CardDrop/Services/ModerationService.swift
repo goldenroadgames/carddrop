@@ -98,6 +98,22 @@ struct ModerationService {
         }
     }
 
+    /// The create-flow step that holds a flagged field, from the labels in
+    /// PostcardDraft.userTypedTextItems: 1 = Style It, 2 = Write Card,
+    /// 3 = Invisible Ink. The lowest one is where the person is sent when the
+    /// alert closes, forward or back from where they are. nil = no field
+    /// detail (stay put).
+    static func lowestStep(for fields: [FlaggedField]) -> Int? {
+        fields.compactMap { field -> Int? in
+            switch field.label {
+            case "A caption", "A greetings banner", "A QR code text", "The border text": return 1
+            case "The message", "The \"From\" name", "The \"To\" name", "The greeting", "The phrase": return 2
+            case "The back message": return 3
+            default: return nil
+            }
+        }.min()
+    }
+
     /// The alert text for a flagged create-step check. With field detail:
     /// "The message may contain hate speech. A caption may contain ...".
     /// Without it, the caller's own generic wording.
