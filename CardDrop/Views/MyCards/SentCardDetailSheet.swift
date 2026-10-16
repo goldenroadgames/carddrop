@@ -266,13 +266,13 @@ struct SentCardDetailSheet: View {
                     .padding(.vertical, 16)
             } else if expiredOnServer {
                 Text("Expired and removed from CardDrop's server. You can still send it again.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundColor(.black)
                     .padding(.horizontal, 16)
             } else if recipients.isEmpty {
                 Text("No send record found for this card.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundColor(.black)
                     .padding(.horizontal, 16)
             } else {
                 VStack(spacing: 0) {
@@ -320,8 +320,8 @@ struct SentCardDetailSheet: View {
                 Text(!cardRepliesEnabled || !CardReplyService.profileRepliesEnabled
                      ? "Replies are turned off."
                      : "No replies yet.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundColor(.black)
                     .padding(.horizontal, 16)
             } else if !replies.isEmpty {
                 VStack(spacing: 0) {

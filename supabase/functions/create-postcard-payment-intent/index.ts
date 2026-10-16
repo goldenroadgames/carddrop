@@ -82,6 +82,7 @@ Deno.serve(async (req) => {
       texts: [sender, recipient].flatMap((a) => [
         a.first_name, a.last_name, a.street, a.city, a.state, a.country,
       ]).filter((t): t is string => typeof t === "string"),
+      blocklist: false, // street/place names can contain list words
     });
     if (addressVerdict.status === "error") {
       return json({

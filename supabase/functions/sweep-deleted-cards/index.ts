@@ -130,7 +130,17 @@ Deno.serve(async (req) => {
     // existed) is moved to private storage now.
     const secured = await sweepHeldFiles(supabase);
 
-    return json({ staging, purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions, deleteRequests, history, secured });
+    // Moderation categories: add zz_config rows for any category OpenAI has
+    // added since the last run. Never stops the sweep.
+    let newCategories: string[] | { error: string } = [];
+    try {
+      newCategories = await sweepModerationCategories(supabase);
+    } catch (err) {
+      console.error("moderation category check failed:", err);
+      newCategories = { error: String(err) };
+    }
+
+    return json({ staging, purged, failed, reportedDeleted, retention, finalSuspensions, staleAppeals, dormantSuspensions, deleteRequests, history, secured, newCategories });
   } catch (err) {
     console.error("sweep-deleted-cards error:", err);
     return json({ error: "Internal server error" }, 500);
@@ -369,6 +379,54 @@ async function sweepStaging(supabase: ReturnType<typeof createClient>, maxAgeMs:
     if (folders.length < 100) break;
   }
   return removed;
+}
+
+// Asks OpenAI's moderation endpoint about one harmless text, reads the category
+// names in the reply, and inserts any missing moderation_threshold_<cat> ('0')
+// and moderation_label_<cat> (raw name) rows. Returns the categories it added.
+// deno-lint-ignore no-explicit-any
+async function sweepModerationCategories(supabase: any): Promise<string[]> {
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
+  const res = await fetch("https://api.openai.com/v1/moderations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model: "omni-moderation-latest", input: "Happy birthday!" }),
+  });
+  if (!res.ok) throw new Error(`OpenAI moderation HTTP ${res.status}`);
+  const body = await res.json();
+  const categories = Object.keys(body?.results?.[0]?.categories ?? {});
+  if (categories.length === 0) throw new Error("no categories in OpenAI reply");
+
+  const { data: existing } = await supabase.from("zz_config").select("key").like("key", "moderation_%");
+  const have = new Set((existing ?? []).map((r: { key: string }) => r.key));
+  const rows: { key: string; value: string; description: string }[] = [];
+  const added: string[] = [];
+  for (const cat of categories) {
+    let isNew = false;
+    if (!have.has(`moderation_threshold_${cat}`)) {
+      isNew = true;
+      rows.push({
+        key: `moderation_threshold_${cat}`,
+        value: "0",
+        description: `Minimum OpenAI moderation score for ${cat} to block (0.0-1.0). 0 = block on OpenAI's own flag alone (strictest). A higher value lets lower-scoring flags through; it can never block more than OpenAI's flag.`,
+      });
+    }
+    if (!have.has(`moderation_label_${cat}`)) {
+      isNew = true;
+      rows.push({
+        key: `moderation_label_${cat}`,
+        value: cat,
+        description: `Friendly name shown to the user and in admin when OpenAI flags ${cat}. Takes effect on the next moderation call, no redeploy.`,
+      });
+    }
+    if (isNew) added.push(cat);
+  }
+  if (rows.length > 0) {
+    const { error } = await supabase.from("zz_config").upsert(rows, { onConflict: "key", ignoreDuplicates: true });
+    if (error) throw new Error(error.message);
+  }
+  return added;
 }
 
 function json(body: unknown, status = 200): Response {

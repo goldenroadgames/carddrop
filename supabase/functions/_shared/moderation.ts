@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { compileBlocklist, hasBlockedWord } from "./blocklist.ts";
 
 // Shared by submit-reply (web replies), moderate-content (the iOS app's create
 // steps) and send-card (the final gate before a card is stored). Calls OpenAI's
@@ -22,7 +23,7 @@ export type ModerationVerdict =
   // as a strike, photos and text each against their own limits (contentBlocks.ts).
   // textFlags = each flagged (trimmed) text string with its own categories, so the
   // app can say which field was flagged (moderate-content).
-  | { status: "flagged"; categories: string[]; photo: boolean; text: boolean; fingerprints: string[]; scores: Record<string, number>; parts: BlockPart[]; textFlags: { text: string; categories: string[] }[] }
+  | { status: "flagged"; categories: string[]; photo: boolean; text: boolean; fingerprints: string[]; scores: Record<string, number>; parts: BlockPart[]; displayParts: DisplayPart[]; textFlags: { text: string; categories: string[] }[] }
   | { status: "error" };
 
 // Human-readable names shown to the user (same labels the app used).
@@ -41,6 +42,11 @@ const LABELS: Record<string, string> = {
   "violence": "violent content",
   "violence/graphic": "graphic violence",
 };
+
+// Everything flagged, for telling the user what was flagged. Unlike `parts`
+// (which are what count as strikes) it also includes blocklist hits, which
+// never count.
+export type DisplayPart = { kind: "photo" | "text"; categories: string[]; imageKeys?: string[] };
 
 export type BlockPart = {
   kind: "photo" | "text";
@@ -63,7 +69,7 @@ export async function moderateContent(
   // private staged files), so large files never pass through this function.
   // key = a stable string for the file (its storage path), hashed as the
   // fingerprint instead of the bytes.
-  input: { texts?: string[]; images?: Uint8Array[]; imageUrls?: { url: string; key: string }[] },
+  input: { texts?: string[]; images?: Uint8Array[]; imageUrls?: { url: string; key: string }[]; blocklist?: boolean },
 ): Promise<ModerationVerdict> {
   // Duplicates are dropped (e.g. the message preview is part of the message).
   const texts = Array.from(new Set((input.texts ?? []).map((t) => t.trim()).filter((t) => t.length > 0)));
@@ -80,12 +86,32 @@ export async function moderateContent(
   const { data: rows } = await supabase
     .from("zz_config")
     .select("key, value")
-    .like("key", "moderation_threshold_%");
+    .like("key", "moderation_%");
   const thresholds: Record<string, number> = {};
+  const labels: Record<string, string> = {};
+  let blocklistRaw = "";
+  let blocklistOn = true;
   for (const r of rows ?? []) {
-    const score = Number(r.value);
-    if (!Number.isNaN(score)) thresholds[r.key.replace("moderation_threshold_", "")] = score;
+    if (r.key.startsWith("moderation_threshold_")) {
+      const score = Number(r.value);
+      if (!Number.isNaN(score)) thresholds[r.key.replace("moderation_threshold_", "")] = score;
+    } else if (r.key.startsWith("moderation_label_")) {
+      const text = String(r.value ?? "").trim();
+      if (text) labels[r.key.replace("moderation_label_", "")] = text;
+    } else if (r.key === "moderation_blocklist") {
+      blocklistRaw = String(r.value ?? "");
+    } else if (r.key === "moderation_blocklist_enabled") {
+      blocklistOn = String(r.value ?? "").trim().toLowerCase() !== "false";
+    }
   }
+
+  // Blocklist hits: blocked, but never a strike (they stay out of `parts`).
+  const profaneTexts = input.blocklist !== false && blocklistOn
+    ? (() => {
+      const list = compileBlocklist(blocklistRaw);
+      return texts.filter((t) => hasBlockedWord(t, list));
+    })()
+    : [];
 
   const calls: { kind: "text" | "photo"; body: unknown; inputs: string[]; image?: Uint8Array; key?: string }[] = [];
   // One call carries up to 25 texts, each scored separately (a longer list
@@ -145,7 +171,7 @@ export async function moderateContent(
       const itemLabels = new Set<string>();
       for (const [category, on] of Object.entries(item.categories ?? {})) {
         if (on && (item.category_scores?.[category] ?? 1) >= (thresholds[category] ?? 0)) {
-          const label = LABELS[category] ?? category;
+          const label = labels[category] ?? LABELS[category] ?? category;
           flagged.add(label);
           const rounded = Math.round((item.category_scores?.[category] ?? 0) * 1000) / 1000;
           scores[label] = Math.max(scores[label] ?? 0, rounded);
@@ -172,6 +198,12 @@ export async function moderateContent(
       }
     });
   }
+  for (const t of profaneTexts) {
+    flagged.add("profanity");
+    const set = textFlagMap.get(t) ?? new Set<string>();
+    set.add("profanity");
+    textFlagMap.set(t, set);
+  }
   if (flagged.size === 0) return { status: "clean" };
 
   const textFingerprints = await Promise.all(
@@ -197,6 +229,12 @@ export async function moderateContent(
       scores: kindScores.text,
     });
   }
+  const displayParts: DisplayPart[] = parts.map((p) => ({ kind: p.kind, categories: [...p.categories], imageKeys: p.imageKeys }));
+  if (profaneTexts.length > 0) {
+    const textPart = displayParts.find((p) => p.kind === "text");
+    if (textPart) textPart.categories = Array.from(new Set([...textPart.categories, "profanity"])).sort();
+    else displayParts.push({ kind: "text", categories: ["profanity"] });
+  }
   return {
     status: "flagged",
     categories: Array.from(flagged).sort(),
@@ -205,6 +243,7 @@ export async function moderateContent(
     fingerprints: Array.from(new Set(fingerprints)),
     scores,
     parts,
+    displayParts,
     textFlags: Array.from(textFlagMap, ([text, cats]) => ({ text, categories: Array.from(cats).sort() })),
   };
 }

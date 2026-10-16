@@ -91,6 +91,10 @@ struct SendOptionsView: View {
     @State private var pendingMailPrice: PostcardPriceOption?
     @State private var postcardOrderConfirmed = false
     @State private var isSubmittingToLOB = false
+    // True only while new files are being uploaded (and so checked), to show
+    // the content-check line in the busy dialogs.
+    @State private var checkingContent = false
+    @State private var checkingLOBContent = false
     @State private var showLOBSubmissionError = false
     @State private var lobSubmissionErrorMessage: String?
 
@@ -246,8 +250,14 @@ struct SendOptionsView: View {
                         Color.black.opacity(0.25).ignoresSafeArea()
                         VStack(spacing: 12) {
                             ProgressView()
-                            Text("Sending…")
+                            Text("Preparing your message…")
                                 .font(.subheadline)
+                            if checkingContent {
+                                Text("Checking your card meets our guidelines")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
                         }
                         .padding(24)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -642,6 +652,12 @@ struct SendOptionsView: View {
                             .font(.subheadline.weight(.medium))
                             .foregroundColor(.primary)
                             .multilineTextAlignment(.center)
+                        if checkingLOBContent {
+                            Text("Checking your card meets our guidelines")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
                     }
                     .padding(24)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -998,6 +1014,7 @@ struct SendOptionsView: View {
         onSubmittingToLOBChanged(true)
         defer {
             isSubmittingToLOB = false
+            checkingLOBContent = false
             onSubmittingToLOBChanged(false)
         }
 
@@ -1011,6 +1028,7 @@ struct SendOptionsView: View {
             if let existing = try await CardUploadService.existingLOBExportURLs(cardID: draft.cardID, sizeLabel: sizeLabel) {
                 urls = existing
             } else {
+                checkingLOBContent = true
                 let lobSize: CardRenderer.LOBPostcardSize = size == .fourBySix ? .fourBySix : .sixByNine
                 guard let export = CardRenderer.renderLOBTestExport(draft: draft, filteredImage: filteredImage, size: lobSize),
                       let frontData = export.front.jpegData(compressionQuality: 0.88),
@@ -1133,6 +1151,7 @@ struct SendOptionsView: View {
 
         // Upload + call Edge Function
         isSending = true
+        checkingContent = true
         do {
             let frontInk = draft.qrOverlays.first(where: { !$0.userInputText.isEmpty })?.content
             let backInk: String? = (draft.includeBackMessageQR && !draft.backMessageQRContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -1171,6 +1190,7 @@ struct SendOptionsView: View {
             showSendErrorAlert = true
         }
         isSending = false
+        checkingContent = false
     }
 
 }

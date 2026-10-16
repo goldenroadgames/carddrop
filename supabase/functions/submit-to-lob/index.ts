@@ -130,7 +130,7 @@ Deno.serve(async (req) => {
         error: "content_flagged",
         categories: verdict.categories,
         // What was flagged, by kind and image, so the app can say which.
-        flagged: verdict.parts.map((p) => ({
+        flagged: verdict.displayParts.map((p) => ({
           kind: p.kind,
           categories: p.categories,
           images: p.kind === "photo"
