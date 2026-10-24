@@ -25,7 +25,7 @@ export async function purgeCard(
   const id = cardID.toLowerCase();
 
   // Child rows first.
-  for (const table of ["replies", "reactions", "card_views", "card_recipients"]) {
+  for (const table of ["replies", "reactions", "card_recipients"]) {
     const { error } = await supabase.from(table).delete().eq("card_id", id);
     if (error) return `${table}: ${error.message}`;
   }

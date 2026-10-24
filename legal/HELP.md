@@ -24,6 +24,10 @@ Delete it from your Sent or Drafts postcards. It is removed from your device, th
 
 In the app, open your profile and choose **Delete Account**. This removes your cards and account data. See our [Privacy Policy](https://carddropapp.com/privacy) for what we keep, and for how long, after that.
 
+### How do I turn notifications on or off?
+
+In the app, open Profile and use **Notify me about my cards**. You can also change it in your device's Settings.
+
 ### My account was suspended.
 
 Accounts are suspended after repeated reports from recipients, or after repeated attempts to add content that our automated checks block, such as photos or harassing text. If you think it was a mistake, tap **Appeal This Decision** on the Account Suspended screen and tell us what happened. We look at each appeal together with your account's history, such as how many cards you have sent and how many were reported, and show our decision on that screen. Not every appeal gets a full review. An appeal that isn't reviewed within 30 days is closed, and you can appeal again 30 days after the decision. A repeat suspension may be final, with no appeal. If a suspended account isn't appealed, its data is deleted after about {{suspension_delete_days}} days, though we keep the records we need to stop abuse.

@@ -20,6 +20,8 @@ This Privacy Policy explains how Golden Road Games LLC ("CardDrop," "we," "us," 
 
 **Replies and reactions.** People who open one of your card links can reply with text or an emoji reaction. Replies cannot include photos. We collect what they send and the time. We do not ask for their name or contact details. We do not keep who sent a reply.
 
+**Notifications.** If you allow notifications, we store a notification code for your device and use Apple's notification service to tell you when a card you sent is opened or when someone replies to it or reacts to it. We delete the code when you sign out or delete your account. You can turn notifications off at any time in Profile or in your device's Settings.
+
 ## 2. How We Use Information
 
 We use the information we collect to:
