@@ -73,6 +73,7 @@ class AuthManager: NSObject, ObservableObject {
                 }
                 if let session {
                     Task { await self.loadProfile(id: session.user.id) }
+                    PushNotificationManager.shared.sessionDidStart(userID: session.user.id)
                 } else {
                     self.clearProfile()
                 }
@@ -82,6 +83,8 @@ class AuthManager: NSObject, ObservableObject {
 
     func signOut() {
         Task {
+            // Stop pushes for this device while the session still exists.
+            await PushNotificationManager.shared.unregister()
             try? await supabase.auth.signOut()
         }
     }

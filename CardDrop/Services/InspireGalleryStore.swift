@@ -85,7 +85,7 @@ final class InspireGalleryStore: ObservableObject {
 
         return (try? await supabase
             .from("marketing_cards")
-            .select("card_id, sender_id, is_portrait, design_features, added_to_marketing_at")
+            .select("card_id, is_portrait, design_features, added_to_marketing_at")
             .eq("in_inspire", value: true)
             .order("added_to_marketing_at", ascending: false)
             .range(from: from, to: to)

@@ -80,6 +80,21 @@ enum CardReplyService {
         }
     }
 
+    private struct OpenedRow: Decodable { let first_opened_at: Date? }
+
+    /// When a recipient first really viewed this card on the web (cards.first_opened_at),
+    /// or nil if not yet. Independent of the "Allow replies" switches.
+    static func fetchFirstOpened(for cardID: UUID) async -> Date? {
+        let row = try? await supabase
+            .from("cards")
+            .select("first_opened_at")
+            .eq("id", value: cardID.uuidString)
+            .single()
+            .execute()
+            .value as OpenedRow
+        return row?.first_opened_at
+    }
+
     static func fetchReactions(for cardID: UUID) async throws -> [CardReaction] {
         guard await repliesAllowed(for: cardID) else { return [] }
         let rows: [CardReaction] = try await supabase
@@ -101,6 +116,38 @@ enum CardReplyService {
             .execute()
             .value
         return rows
+    }
+
+    private struct ActivityRow: Decodable {
+        let card_id: UUID
+        let sent_at: Date?
+    }
+
+    /// The latest reaction or reply time for each given card (cards with neither
+    /// are absent). Drives the Sent gallery order. Empty while the profile switch
+    /// has replies off, since nothing is shown then.
+    static func fetchLastActivity(for cardIDs: [UUID]) async -> [UUID: Date] {
+        guard profileRepliesEnabled, !cardIDs.isEmpty else { return [:] }
+        var latest: [UUID: Date] = [:]
+        for start in stride(from: 0, to: cardIDs.count, by: 50) {
+            let ids = cardIDs[start..<min(start + 50, cardIDs.count)].map(\.uuidString)
+            for table in ["reactions", "replies"] {
+                let rows: [ActivityRow] = (try? await supabase
+                    .from(table)
+                    .select("card_id, sent_at")
+                    .in("card_id", values: ids)
+                    .order("sent_at", ascending: false)
+                    .limit(1000)
+                    .execute()
+                    .value) ?? []
+                for row in rows {
+                    if let date = row.sent_at, date > (latest[row.card_id] ?? .distantPast) {
+                        latest[row.card_id] = date
+                    }
+                }
+            }
+        }
+        return latest
     }
 
     static func fetchCounts(for cardID: UUID) async -> (reactions: Int, replies: Int) {

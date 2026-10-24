@@ -26,7 +26,7 @@ In the app, open your profile and choose **Delete Account**. This removes your c
 
 ### My account was suspended.
 
-Accounts are suspended after repeated reports from recipients, or after repeated attempts to add content that our automated checks block, such as photos or harassing text. If you think it was a mistake, tap **Appeal This Decision** on the Account Suspended screen and tell us what happened. We review appeals and show our decision on that screen. An appeal that isn't reviewed within 30 days is closed, and you can appeal again 30 days after the decision. A repeat suspension may be final, with no appeal. If a suspended account isn't appealed, its data is deleted after about {{suspension_delete_days}} days, though we keep the records we need to stop abuse.
+Accounts are suspended after repeated reports from recipients, or after repeated attempts to add content that our automated checks block, such as photos or harassing text. If you think it was a mistake, tap **Appeal This Decision** on the Account Suspended screen and tell us what happened. We look at each appeal together with your account's history, such as how many cards you have sent and how many were reported, and show our decision on that screen. Not every appeal gets a full review. An appeal that isn't reviewed within 30 days is closed, and you can appeal again 30 days after the decision. A repeat suspension may be final, with no appeal. If a suspended account isn't appealed, its data is deleted after about {{suspension_delete_days}} days, though we keep the records we need to stop abuse.
 
 ## If you received a card
 
@@ -37,6 +37,10 @@ It's a digital postcard. Open the link and the card opens for you to flip, read 
 ### Can I reply or react?
 
 Yes, unless the sender does not allow replies. Use the reply and reaction buttons under the card. Your reply goes back to the person who sent it.
+
+### Can I share a card I received?
+
+Tap the share button under the card, then choose **Share link** to send the link, or **Share Cardfront** to share a picture of the front. The back is not shared as a picture.
 
 ### What happens to replies and reactions when a card expires?
 

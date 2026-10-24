@@ -80,6 +80,9 @@ Deno.serve(async (req) => {
       // Send-rate cap log: the cap only looks back 24 hours, so keep 2 days.
       ["send_events", supabase.from("send_events").delete()
         .lt("created_at", new Date(Date.now() - 2 * 86400000).toISOString())],
+      // Report-form rate limit log (hashed IPs): the limit only looks back an hour.
+      ["report_attempts", supabase.from("report_attempts").delete()
+        .lt("created_at", new Date(Date.now() - 2 * 86400000).toISOString())],
     ];
     for (const [name, op] of steps) {
       const { error: opError } = await op;

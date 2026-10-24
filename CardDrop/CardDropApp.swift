@@ -5,6 +5,7 @@ import StripePaymentSheet
 
 @main
 struct CardDropApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var authManager = AuthManager()
     @StateObject private var addressBook = AddressBookManager()
     @StateObject private var draftManager = DraftManager()

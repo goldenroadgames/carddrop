@@ -1,5 +1,6 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { checkCardAcceptsReplies } from "../_shared/replyGate.ts";
+import { sendPush } from "../_shared/push.ts";
 
 // Called from the public card page (anon key, no login) when a visitor taps an
 // emoji. Replaces the old direct insert into reactions so the sender's
@@ -53,6 +54,7 @@ Deno.serve(async (req) => {
       console.error("reaction insert error:", error);
       return json({ error: "try_later" }, 500);
     }
+    await sendPush(supabase, gate.card.sender_id, gate.card.id, "reaction", emoji);
     return json({ status: "ok" });
   } catch (err) {
     console.error("submit-reaction error:", err);

@@ -12,6 +12,7 @@ struct MainTabView: View {
     @State private var showUnsavedAlert = false
     @State private var intendedTab: AppTab = .postcards
     @State private var showInspire = false
+    @ObservedObject private var push = PushNotificationManager.shared
 
     // .inspire is never actually selected — it's a link segment that opens
     // the Inspire gallery as a sheet (see pickerBinding).
@@ -39,6 +40,10 @@ struct MainTabView: View {
                 .padding(.vertical, 8)
                 .background(Color(uiColor: .systemBackground))
             }
+        }
+        .onChange(of: push.pendingCardID) {
+            // A tapped push is about a sent card: show the Postcards tab.
+            if push.pendingCardID != nil && selectedTab == .profile && !profileIsDirty { selectedTab = .postcards }
         }
         .alert("Unsaved Changes", isPresented: $showUnsavedAlert) {
             Button("Discard Changes", role: .destructive) {

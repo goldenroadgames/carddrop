@@ -37,6 +37,27 @@ Deno.serve(async (req) => {
     const blockAll = body.blockAll === true;
     const text = typeof body.text === "string" ? body.text.trim().slice(0, 2000) : "";
     if (!UUID_RE.test(cardID)) return json({ error: "invalid card" }, 400);
+
+    // ---------------- per-IP rate limit ----------------
+    // The admin "Report card" button calls this with the service-role key and
+    // is exempt (it comes from the web server's IP, not a reporter's).
+    const isAdminCall = req.headers.get("authorization") === `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`;
+    if (!isAdminCall) {
+      const ipHash = await hashIp(req);
+      const limit = await attemptsPerHour(supabase);
+      const since = new Date(Date.now() - 3600_000).toISOString();
+      const { count, error: countError } = await supabase
+        .from("report_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("ip_hash", ipHash)
+        .gte("created_at", since);
+      if (countError) {
+        console.error("report_attempts count error:", countError);
+        return json({ error: "try_later" }, 503);
+      }
+      if ((count ?? 0) >= limit) return json({ error: "rate_limited" }, 429);
+      await supabase.from("report_attempts").insert({ ip_hash: ipHash });
+    }
     // Optional contact, kept only with a yes / not sure answer.
     const contactRaw = typeof body.contact === "string" ? body.contact.trim().slice(0, 200) : "";
     // "Does this card show or involve a child?" yes / no / not_sure (null = not asked).
@@ -65,6 +86,8 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (existing) {
+      // Every repeat is counted (no strike): shown on the admin review pages.
+      await supabase.rpc("bump_complaint_report", { p_card_id: card.id });
       // A card whose report was dismissed gets reported again: reopen the
       // same complaint (it counts as a strike again and returns to the review
       // list as unviewed), keeping the earlier history in card_view_log.
@@ -355,6 +378,37 @@ async function notifySender(
 ) {
   if (!senderID) return;
   await supabase.from("user_notices").insert({ user_id: senderID, kind, message });
+}
+
+// Keyed hash of the visitor's IP, so the table never holds a raw address.
+// cf-connecting-ip is set by Cloudflare in front of Supabase and can't be
+// forged by the caller; the other headers are fallbacks.
+async function hashIp(req: Request): Promise<string> {
+  const ip = req.headers.get("cf-connecting-ip") ??
+    req.headers.get("x-real-ip") ??
+    req.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
+    "unknown";
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(ip)));
+  return Array.from(sig, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// deno-lint-ignore no-explicit-any
+async function attemptsPerHour(supabase: any): Promise<number> {
+  const { data } = await supabase
+    .from("zz_config")
+    .select("value")
+    .eq("key", "report_attempts_per_ip_hourly")
+    .maybeSingle();
+  const n = parseInt(data?.value ?? "", 10);
+  return n > 0 ? n : 3;
 }
 
 function json(body: unknown, status = 200): Response {

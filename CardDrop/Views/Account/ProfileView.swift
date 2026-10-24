@@ -13,6 +13,9 @@ struct ProfileView: View {
     @State private var showSignInGate = false
     @State private var showRepliesOffChoice = false
     @State private var repliesErrorShown = false
+    @ObservedObject private var push = PushNotificationManager.shared
+    @State private var notifyErrorShown = false
+    @State private var notifySettingsShown = false
 
     @State private var senderNickname = ""
     @State private var nicknameSyncTask: Task<Void, Never>?
@@ -87,6 +90,29 @@ struct ProfileView: View {
                                 Text("Allow replies")
                                     .foregroundStyle(.primary)
                                 Text("Let people react to your cards with messages, photos and emojis")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        Task {
+                            switch await push.setNotifyReplies(!push.notifyReplies) {
+                            case .ok: break
+                            case .failed: notifyErrorShown = true
+                            case .needsSystemSettings: notifySettingsShown = true
+                            }
+                        }
+                    } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: push.notifyReplies ? "checkmark.square" : "square")
+                                .font(.system(size: 22))
+                                .foregroundStyle(.primary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Notify me about my cards")
+                                    .foregroundStyle(.primary)
+                                Text("Get a notification when a card you sent is opened, or when someone replies to it or reacts to it")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -188,6 +214,19 @@ struct ProfileView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Replies and reactions stop on all your cards. Hidden ones come back if you turn replies on again; deleted ones are gone for good.")
+            }
+            .alert("Couldn't update notifications", isPresented: $notifyErrorShown) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Check your connection and try again.")
+            }
+            .alert("Notifications are off", isPresented: $notifySettingsShown) {
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Notifications for CardDrop are turned off in your device's Settings. Turn them on there to get notified.")
             }
             .alert("Couldn't update replies", isPresented: $repliesErrorShown) {
                 Button("OK", role: .cancel) {}

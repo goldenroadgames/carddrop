@@ -20,6 +20,9 @@ struct PostcardsView: View {
     @State private var repliesPanelSnapshot: PostcardDraftSnapshot? = nil
     @State private var showRepliesPanel = false
     @State private var sentDetailSnapshot: PostcardDraftSnapshot? = nil
+    // Latest reaction/reply time per sent card; the gallery orders by the newer of this and lastModified.
+    @State private var lastActivity: [UUID: Date] = [:]
+    @ObservedObject private var push = PushNotificationManager.shared
 
     enum CardTab { case sent, drafts, rings }
 
@@ -224,6 +227,20 @@ struct PostcardsView: View {
             Text(noticeMessage)
         }
         .task { await refreshReportedAndNotice() }
+        .task {
+            openPushedCard()
+            if !sentCards.isEmpty { push.offerPermissionIfNeeded() }
+        }
+        .onChange(of: push.pendingCardID) { openPushedCard() }
+        .onChange(of: showCreateFlow) {
+            if !showCreateFlow && !sentCards.isEmpty { push.offerPermissionIfNeeded() }
+        }
+        .alert("Get notified about your cards?", isPresented: $push.showPrePrompt) {
+            Button("Turn On") { Task { await push.requestPermission() } }
+            Button("Not Now", role: .cancel) { push.declinePrePrompt() }
+        } message: {
+            Text("We can let you know when a card you sent is opened, or when someone replies to it or reacts to it. You can change this any time in Profile.")
+        }
         .onChange(of: selectedTab) {
             if selectedTab == .sent { Task { await refreshReportedAndNotice() } }
         }
@@ -243,6 +260,12 @@ struct PostcardsView: View {
             await CardRestoreService.refreshReported(userID: id, draftManager: draftManager)
         }
         await showPendingNotice()
+        await refreshLastActivity()
+    }
+
+    private func refreshLastActivity() async {
+        let ids = draftManager.drafts.filter { $0.status == .sent }.compactMap(\.cardID)
+        lastActivity = await CardReplyService.fetchLastActivity(for: ids)
     }
 
     private func showPendingNotice() async {
@@ -283,11 +306,27 @@ struct PostcardsView: View {
 
     // MARK: - Drafts
 
+    /// A tapped push names a card: show its Sent Card sheet (if it is on this device).
+    private func openPushedCard() {
+        guard let id = push.pendingCardID else { return }
+        push.pendingCardID = nil
+        guard let snapshot = draftManager.drafts.first(where: { $0.cardID == id && $0.status == .sent }) else { return }
+        selectedTab = .sent
+        sentDetailSnapshot = snapshot
+    }
+
     private var unsentDrafts: [PostcardDraftSnapshot] {
         draftManager.drafts.filter { $0.status == .unsent }.sorted { $0.lastModified > $1.lastModified }
     }
     private var sentCards: [PostcardDraftSnapshot] {
-        draftManager.drafts.filter { $0.status == .sent && !draftManager.isHidden($0) }.sorted { $0.lastModified > $1.lastModified }
+        draftManager.drafts
+            .filter { $0.status == .sent && !draftManager.isHidden($0) }
+            .sorted { sentOrderDate($0) > sentOrderDate($1) }
+    }
+
+    // Newest first by the greatest of: last modified/sent, last reaction, last reply.
+    private func sentOrderDate(_ snapshot: PostcardDraftSnapshot) -> Date {
+        max(snapshot.lastModified, snapshot.cardID.flatMap { lastActivity[$0] } ?? .distantPast)
     }
 
     private var ringsContent: some View {
@@ -435,9 +474,18 @@ struct CardTileView: View {
     @State private var image: UIImage? = nil
     @State private var reactions: [CardReaction] = []
     @State private var replyCount: Int = 0
+    @State private var openedAt: Date? = nil
 
     // One shared diameter for the trash, download, and reply/reaction circles.
     private let circleSize: CGFloat = 32
+
+    // The gallery tile shows only the most recent reaction; the Sent Card sheet
+    // lists them all. A missing date counts as oldest; ties go to the later row.
+    private var latestReactionEmoji: String? {
+        reactions.enumerated()
+            .max { ($0.element.sent_at ?? .distantPast, $0.offset) < ($1.element.sent_at ?? .distantPast, $1.offset) }?
+            .element.emoji
+    }
 
     private var placeholderAspectRatio: CGFloat { snapshot.orientationIsLandscape ? 3.0 / 2.0 : 2.0 / 3.0 }
     // "Classic" cards bake a white border into the image itself — inset the
@@ -477,37 +525,37 @@ struct CardTileView: View {
             .padding(.leading, hasWhiteBorder ? 18 : 8)
             .padding(.bottom, hasWhiteBorder ? 16 : 8)
         }
-        // Reply/reaction summary + download button — same corner-inset logic
+        // Reaction/opened and reply summary — same corner-inset logic
         // as the trash button (mirrored to the opposite corner) so both clear
         // a baked-in "Classic" border the same way.
         .overlay(alignment: .bottomTrailing) {
             HStack(spacing: 4) {
                 if showsReplyBadges {
-                    ForEach(Array(Set(reactions.map(\.emoji))).sorted().prefix(3), id: \.self) { emoji in
+                    // One circle: the latest reaction if there is one, else the
+                    // eyes once the card has been opened, else nothing.
+                    if let emoji = latestReactionEmoji {
                         Text(emoji)
                             .font(.system(size: 16))
                             .frame(width: circleSize, height: circleSize)
-                            .background(Color.white)
+                            .background(Color.brandBlue)
+                            .clipShape(Circle())
+                    } else if openedAt != nil {
+                        Image(systemName: "binoculars.fill")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(.white)
+                            .frame(width: circleSize, height: circleSize)
+                            .background(Color.brandBlue)
                             .clipShape(Circle())
                     }
                     if replyCount > 0 {
-                        Text("\(replyCount)")
-                            .font(.system(size: 14, weight: .bold))
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.white)
                             .frame(width: circleSize, height: circleSize)
                             .background(Color.brandBlue)
                             .clipShape(Circle())
                     }
                 }
-                Button(action: share) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(.white)
-                        .frame(width: circleSize, height: circleSize)
-                        .background(Color.brandBlue)
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
             }
             .padding(.trailing, hasWhiteBorder ? 18 : 8)
             .padding(.bottom, hasWhiteBorder ? 16 : 8)
@@ -515,45 +563,10 @@ struct CardTileView: View {
         .task(id: snapshot.lastModified) {
             image = loadImage()
             guard showsReplyBadges, let cardID = snapshot.cardID else { return }
+            openedAt = await CardReplyService.fetchFirstOpened(for: cardID)
             let counts = await CardReplyService.fetchCounts(for: cardID)
             reactions = (try? await CardReplyService.fetchReactions(for: cardID)) ?? []
             replyCount = counts.replies
-        }
-    }
-
-    private func share() {
-        // The on-disk front/back are 300-DPI print renders — downscale to a
-        // digital size (same 1200px long edge as the email thumbnail path).
-        let sides: [(String, UIImage?)] = [("front", image ?? loadImage()), ("back", loadBackImage())]
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "ddMMMyy"
-        let dateString = formatter.string(from: Date())
-        // Share real JPEG files (named, with proper previews) rather than raw
-        // UIImages, and present straight from UIKit — a SwiftUI .sheet around
-        // UIActivityViewController came up blank.
-        let urls: [URL] = sides.compactMap { side, img in
-            guard let img, let data = Self.downscaledForSharing(img).jpegData(compressionQuality: 0.85) else { return nil }
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("CardDrop-\(side)-\(dateString).jpg")
-            try? data.write(to: url, options: .atomic)
-            return url
-        }
-        guard !urls.isEmpty else { return }
-        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first { $0.activationState == .foregroundActive }
-        var top = scene?.keyWindow?.rootViewController
-        while let presented = top?.presentedViewController { top = presented }
-        top?.present(UIActivityViewController(activityItems: urls, applicationActivities: nil), animated: true)
-    }
-
-    private static func downscaledForSharing(_ image: UIImage, maxDimension: CGFloat = 1200) -> UIImage {
-        let long = max(image.size.width, image.size.height)
-        guard long > maxDimension else { return image }
-        let scale = maxDimension / long
-        let newSize = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        return UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: newSize))
         }
     }
 }

@@ -1,6 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { checkCardAcceptsReplies } from "../_shared/replyGate.ts";
 import { moderateContent } from "../_shared/moderation.ts";
+import { sendPush } from "../_shared/push.ts";
 
 // Called from the public card reply forms (anon key, no login).
 // multipart/form-data: cardID, text. Replies are text only: a request that
@@ -94,6 +95,7 @@ Deno.serve(async (req) => {
       return json({ error: "try_later" }, 500);
     }
 
+    await sendPush(supabase, card.sender_id, card.id, "reply");
     return json({ status: "ok" });
   } catch (err) {
     console.error("submit-reply error:", err);

@@ -6,7 +6,6 @@ import Foundation
 /// bucket under anonymized, sender-less paths (no PII).
 struct InspireCard: Decodable, Identifiable, Equatable {
     let card_id: UUID
-    let sender_id: UUID
     let is_portrait: Bool
     let design_features: String?
     let added_to_marketing_at: Date

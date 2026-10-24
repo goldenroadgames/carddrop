@@ -70,6 +70,7 @@ export async function deleteAccountData(supabase: SupabaseClient, uid: string): 
   for (const [table, column] of [
     ["user_address_book", "user_id"],
     ["user_notices", "user_id"],
+    ["push_tokens", "user_id"],
     ["users", "id"],
   ] as const) {
     const { error } = await supabase.from(table).delete().eq(column, uid);
