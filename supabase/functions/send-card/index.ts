@@ -5,6 +5,7 @@ import { imageRole, moderateAndPromote } from "../_shared/cardImages.ts";
 import { recordContentBlock } from "../_shared/contentBlocks.ts";
 import { removeFolder } from "../_shared/purgeCard.ts";
 import { termsAccepted } from "../_shared/terms.ts";
+import { bumpSendStat } from "../_shared/sendStats.ts";
 
 Deno.serve(async (req) => {
   try {
@@ -175,9 +176,11 @@ Deno.serve(async (req) => {
         ["device_uuid", deviceUUID, deviceHourlyCap, deviceDailyCap],
       ] as const) {
         if (hCap >= 0 && await countSince(column, value, 60 * 60 * 1000) >= hCap) {
+          await bumpSendStat(supabase, user.id, "rate_cap_hits");
           return json({ error: "rate_limited", window: "hour" }, 429);
         }
         if (dCap >= 0 && await countSince(column, value, 24 * 60 * 60 * 1000) >= dCap) {
+          await bumpSendStat(supabase, user.id, "rate_cap_hits");
           return json({ error: "rate_limited", window: "day" }, 429);
         }
       }
@@ -321,6 +324,7 @@ Deno.serve(async (req) => {
         sends_lifetime:   sendsLifetime + 1,
       })
       .eq("id", user.id);
+    await bumpSendStat(supabase, user.id, "digital_sends");
 
     // Per-device counters (links the device to this account as a side effect).
     await supabase.from("user_devices").upsert(

@@ -1,6 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { imageRole, moderateAndPromote } from "../_shared/cardImages.ts";
 import { recordContentBlock } from "../_shared/contentBlocks.ts";
+import { bumpSendStat } from "../_shared/sendStats.ts";
 
 // Submits an authorized (not yet charged — see migration 030) physical_orders
 // row to LOB's Postcards API. Can't render anything itself — the
@@ -237,6 +238,7 @@ Deno.serve(async (req) => {
       console.error("Failed to save LOB submission result:", updateError);
       return json({ error: "save_failed", detail: updateError.message }, 500);
     }
+    await bumpSendStat(supabase, order.sender_id, "mail_orders");
 
     return json({
       submitted: true,

@@ -62,6 +62,12 @@ Deno.serve(async (req) => {
     const heldList = `(${(heldRows ?? []).map((c: { id: string }) => c.id).join(",")})`;
     // deno-lint-ignore no-explicit-any
     const notHeld = (q: any) => ((heldRows ?? []).length > 0 ? q.not("card_id", "in", heldList) : q);
+    const { data: statsRow } = await supabase.from("zz_config").select("value").eq("key", "user_send_stats_months").maybeSingle();
+    const statsMonths = parseInt(statsRow?.value ?? "", 10) > 0 ? parseInt(statsRow!.value, 10) : 13;
+    const statsCut = new Date();
+    statsCut.setUTCDate(1);
+    statsCut.setUTCMonth(statsCut.getUTCMonth() - (statsMonths - 1));
+    const statsCutoffMonth = statsCut.toISOString().slice(0, 7); // months before this are deleted
     const retention: Record<string, string | null> = {};
     const steps: [string, PromiseLike<{ error: { message: string } | null }>][] = [
       ["complaint_text", notHeld(supabase.from("card_complaints")
@@ -80,8 +86,13 @@ Deno.serve(async (req) => {
       // Send-rate cap log: the cap only looks back 24 hours, so keep 2 days.
       ["send_events", supabase.from("send_events").delete()
         .lt("created_at", new Date(Date.now() - 2 * 86400000).toISOString())],
+      // Monthly per-user send stats: keep user_send_stats_months (default 13) months.
+      ["user_send_stats", supabase.from("user_send_stats").delete().lt("month_key", statsCutoffMonth)],
       // Report-form rate limit log (hashed IPs): the limit only looks back an hour.
       ["report_attempts", supabase.from("report_attempts").delete()
+        .lt("created_at", new Date(Date.now() - 2 * 86400000).toISOString())],
+      // Web-reply rate limit log (hashed IPs): same, one hour look-back.
+      ["reply_attempts", supabase.from("reply_attempts").delete()
         .lt("created_at", new Date(Date.now() - 2 * 86400000).toISOString())],
     ];
     for (const [name, op] of steps) {

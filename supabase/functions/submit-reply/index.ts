@@ -65,12 +65,7 @@ Deno.serve(async (req) => {
     if ((count ?? 0) >= limit) return json({ error: "rate_limited" }, 429);
     // Every attempt counts, including ones moderation rejects.
     await supabase.from("reply_attempts").insert({ ip_hash: ipHash });
-    if (Math.random() < 0.02) {
-      await supabase
-        .from("reply_attempts")
-        .delete()
-        .lt("created_at", new Date(Date.now() - 2 * 86400000).toISOString());
-    }
+    // Old rows are deleted by the nightly sweep-deleted-cards job.
 
     // ---------------- card still live, replies allowed? ----------------
     // Not deleted / reported / suspended sender, and the sender hasn't switched
